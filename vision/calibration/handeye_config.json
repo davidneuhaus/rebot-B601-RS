@@ -82,5 +82,7 @@
  "auto_iters": 3,
  "auto_tol_mm": 25.0,
  "wrist_hfov_deg_prior": 90.0,
- "auto_note": "v3.9.1 automatic start: search pose search_heights_mm above the expected board point (handeye.json > taught pose > board_guess_mm), board centre from the wrist image (ray to the plane table_z_mm), then aim_height_mm above it; estimates must agree within auto_tol_mm."
+ "auto_note": "v3.9.1 automatic start: search pose search_heights_mm above the expected board point (handeye.json > taught pose > board_guess_mm), board centre from the wrist image (ray to the plane table_z_mm), then aim_height_mm above it; estimates must agree within auto_tol_mm.",
+ "min_samples_after_abort": 10,
+ "min_samples_after_abort_note": "v3.9.2: after an abort (comm loss, stuck joint, STOP) the sweep is solved if at least this many good samples exist; applied automatically only if GOOD"
 }

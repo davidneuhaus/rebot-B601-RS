@@ -366,6 +366,22 @@ the leader.
   rebot-B601-RS/tests/test_gui_v39.py: automatic-start window + sim run.
 - Snapshots: versions/before_v3_9_1, versions/v3_9_1.
 
+## 3.9.2 – 2026-11-21 (laptop) – auto calibration: partial runs, resume, CAN hint
+- Run 23:15 aborted at pose 14 ("pcan reconnect failed": CAN adapter dropped off USB) with 13 good samples saved,
+  but printed "only 0 good samples" (the count was only taken from a completed sweep). Fixed: samples live on the
+  executor and survive any abort.
+- After any abort (comm loss, stuck joint, ■ STOPP) with >= 10 good samples (`min_samples_after_abort`) the sweep is
+  solved and reported like a normal run; applied automatically only if GOOD. OK → "apply available: <folder>" and the
+  GUI button "✓ Übernehmen" (or `./handeye.sh apply <folder>`). POOR → not applied. Exit code 5 = aborted but solved.
+- STOP: the motors still go off at once; handeye.sh keeps bash/tee alive so the partial solve can finish and reach the
+  GUI (a second STOP ends it). The GUI no longer force-kills once "motors off" was logged.
+- Resume: `./handeye.sh run --resume <folder>` continues with the pose after the last good one and appends samples
+  (the resume command is logged after an abort).
+- "pcan reconnect failed" → treated as comm loss + hint "CAN-Adapter direkt am Laptop anstecken (nicht am Hub)".
+- Tests: vision/tests/test_handeye.py section 8 (55/55 script, pytest 14/14); `run --sim` and `run --sim --auto` GOOD.
+- Sim runs (`--sim`) log to $TMPDIR/handeye_sim_logs, never into logs/.
+- Snapshots: versions/before_v3_9_2, versions/v3_9_2.
+
 ## 3.8 – 2026-11-21 (laptop)
 - Session recording with live markers: ⏺ Session aufnehmen, ✓ geklappt (S) / ✗ fehlgeschlagen (F) /
   ↻ Neuer Versuch (N) / 🗑 Verwerfen (D). Asynchronous saving, per-episode label + task in

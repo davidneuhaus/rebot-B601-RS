@@ -49,6 +49,9 @@ class AutoCalUI:
         self.bstop = tk.Button(r1, text="■ STOPP Auto-Kalibrierung", font=("Helvetica", 13, "bold"), fg="#c0392b",
                                state="disabled", command=self.stop)
         self.bstop.pack(side="left", padx=2)
+        self.bapply = tk.Button(r1, text="✓ Übernehmen", command=self.apply_partial, state="disabled")
+        self.bapply.pack(side="left", padx=2)            # v3.9.2: apply an OK result of an aborted / partial run
+        self.apply_folder = None; self.motors_off = False
         self.use_teach = tk.BooleanVar(value=False)         # v3.9.1: default automatic start
         self.cteach = tk.Checkbutton(r1, text="Gespeicherte Ziel-Pose verwenden", variable=self.use_teach,
                                      command=lambda: self._set(self._idle_text()))
@@ -94,6 +97,7 @@ class AutoCalUI:
             has_teach = False
         self.cteach.config(state="normal" if has_teach and not self.busy() else "disabled")
         self.bstop.config(state="normal" if self.running() and not self.stopping else "disabled")
+        self.bapply.config(state="normal" if self.apply_folder and not self.busy() else "disabled")
 
     # ---------------------------------------------------------------- 1. teach (read-only)
     def teach(self):
@@ -218,7 +222,7 @@ class AutoCalUI:
         if reason:
             self._set(f"Geht gerade nicht: {reason}", "#c0392b"); return
         self.ctx["log"]("\n=== Auto-Kalibrierung startet – ■ STOPP Auto-Kalibrierung / Esc = Motoren sofort aus ===\n")
-        self.stopping = False; self.result_lines = []
+        self.stopping = False; self.result_lines = []; self.apply_folder = None; self.motors_off = False
         self.proc = subprocess.Popen(["/bin/bash", HANDEYE_SH, "run", "--yes"] + (["--auto"] if self.mode_auto else []) + EXTRA, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True, bufsize=1, start_new_session=True, cwd=HERE)
         threading.Thread(target=self._reader, args=(self.proc,), daemon=True).start()
@@ -242,7 +246,32 @@ class AutoCalUI:
         self.root.after(1500, self._force, self.proc)
         self.refresh()
 
+    def apply_partial(self):
+        """v3.9.2: write the result of the last (aborted) run into handeye.json + table.json (no hardware)."""
+        folder = self.apply_folder
+        if not folder or self.busy():
+            return
+        self._set("◐ Übernehme das Ergebnis …", "#d68910"); self.bapply.config(state="disabled")
+        def work():
+            try:
+                r = subprocess.run([sys.executable, os.path.join(VISION_DIR, "handeye.py"), "apply", folder],
+                                   capture_output=True, text=True, timeout=120, cwd=HERE)
+                last = ((r.stdout + r.stderr).strip().splitlines() or ["?"])[-1]
+                if r.returncode == 0:
+                    self.apply_folder = None
+                    self.q.put(("msg", "✓ übernommen (handeye.json + table.json). Jetzt 📐 Neu kalibrieren drücken.", "#1a7a32"))
+                else:
+                    self.q.put(("msg", f"Übernehmen fehlgeschlagen: {last}", "#c0392b"))
+            except Exception as e:
+                self.q.put(("msg", f"Übernehmen fehlgeschlagen: {e}", "#c0392b"))
+        threading.Thread(target=work, daemon=True).start()
+
     def _force(self, p):
+        if p.poll() is None and self.motors_off:
+            # v3.9.2: motors are already off; the process is solving the partial sweep - let it finish
+            self.ctx["log"]("Motoren aus – werte die bisherigen Posen noch aus (erneut STOPP = abbrechen)\n")
+            self.stopping = False
+            return
         if p.poll() is None:
             self.ctx["log"]("Auto-Kalibrierung reagiert nicht – erzwinge Beenden und schalte Motoren aus\n")
             try: os.killpg(p.pid, signal.SIGKILL)
@@ -274,6 +303,13 @@ class AutoCalUI:
                 elif kind == "line":
                     self.ctx["log"](a)
                     s = a.split("] ", 1)[-1].strip()
+                    if s.startswith(("STOP: motors off", "motors off (no further", "motors off: no answer",
+                                     "rest reached, motors off")) or (s.startswith("rest move failed") and "motors off" in s):
+                        self.motors_off = True
+                    if s.startswith("apply available: "):
+                        self.apply_folder = s[len("apply available: "):].strip()
+                    if s.startswith(("HINWEIS", "resume possible", "not applied", "aborted run")):
+                        self.result_lines.append(s)
                     if s.startswith(("pose ", "RUNNING", "start:", "board seen", "moving to", "start pose found")):
                         self._set("● LÄUFT: " + s[:110] + "   (■ STOPP / Esc = Motoren sofort aus)", "#1a9c3a")
                     elif s.startswith(("ABORT", "ERROR", "refused", "quality POOR")):
@@ -290,7 +326,12 @@ class AutoCalUI:
             rc = p.returncode; self.proc = None
             self.ctx["log"](f"=== Auto-Kalibrierung beendet (Code {rc}) ===\n")
             if self.result_lines:
-                self._set("\n".join(self.result_lines), "#1a7a32" if "GOOD" in self.result_lines[0] or "OK" in self.result_lines[0] else "#c0392b")
+                res = [l for l in self.result_lines if l.startswith("Hand-eye result")]
+                good = bool(res) and ("GOOD" in res[0] or "OK" in res[0])
+                txt = "\n".join(self.result_lines)
+                if self.apply_folder:
+                    txt += "\n→ Ergebnis nicht automatisch übernommen: prüfen, dann ✓ Übernehmen"
+                self._set(txt, "#1a7a32" if good and rc == 0 else ("#d68910" if good else "#c0392b"))
             elif rc != 0 and not str(self.msg.cget("text")).startswith("⚠"):
                 self._set(f"⚠ Auto-Kalibrierung beendet (Code {rc}) – siehe Log / logs/handeye_*.log", "#c0392b")
             elif rc == 0:

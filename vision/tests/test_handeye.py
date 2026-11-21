@@ -11,6 +11,8 @@
 7. v3.9.1 regressions (22:29 crash): fake follower that clamps relative targets like LeRobot (+ a weak elbow),
    fake follower that stops responding (frozen feedback / ack timeouts), clean aborts without return moves,
    automatic start (search pose -> board -> aim pose) for several camera mounting rolls, board not found.
+8. v3.9.2: after an abort with >= 10 good samples the sweep is solved (sample count bug of 23:16 fixed), applied only if
+   GOOD ('apply available' for OK), resume of an aborted folder, CAN adapter hint on 'pcan reconnect failed'.
 Also runs under pytest:  ~/humanoid/.venv/bin/python -m pytest -q ~/humanoid/vision/tests/test_handeye.py
 """
 import json, os, shutil, subprocess, sys, tempfile, time
@@ -354,6 +356,109 @@ def test_synthetic_and_apply():
 def test_7h_auto_end_to_end(): t7h_auto_end_to_end(); _ok("7h")
 
 
+
+# ---------------------------------------------------------------- 8. v3.9.2 partial runs (23:16 abort at pose 14)
+class CountingLog(Logs):
+    """Calls on_ok(n) after every '  ok:' line (= good sample n)."""
+    def __init__(self, on_ok):
+        super().__init__(); self.n = 0; self.on_ok = on_ok
+
+    def __call__(self, msg):
+        super().__call__(msg)
+        if str(msg).startswith("  ok:"):
+            self.n += 1; self.on_ok(self.n)
+
+
+class PcanArm(H.SimArm):
+    """send_action fails like the plugin when the PCAN adapter drops off USB."""
+    fail = False
+
+    def command(self, q7):
+        if self.fail:
+            raise RuntimeError("send_mit failed: pcan reconnect failed after 3 attempts")
+        return super().command(q7)
+
+
+def _abort_after(n_good, truth, plan, kind="pcan", out=None, real=False, grade=None, monkey=None):
+    arm = PcanArm(REST + [0.0], 4.0)
+    def on_ok(n):
+        if n == n_good:
+            if kind == "pcan":
+                arm.fail = True
+            else:                                 # user STOP
+                def boom(q7):
+                    raise H.Stop()
+                arm.command = boom
+    lg = CountingLog(on_ok)
+    out = out or Path(tempfile.mkdtemp()) / "o"
+    applied = []
+    old_apply, old_replay = H.apply_result, H.replay
+    if real:                                      # non-sim path, but never touch the real calibration files
+        H.apply_result = lambda r, log=None: applied.append(r)
+        if grade:
+            def fake_replay(folder, **kw):
+                r = old_replay(folder, **kw); r["quality"]["grade"] = grade; return r
+            H.replay = fake_replay
+    try:
+        r = H.run(yes=True, sim=not real, sim_truth=truth, plan=plan, out_dir=out, log=lg, arm=arm,
+                  cams=_sim_cams(arm, truth))
+    finally:
+        H.apply_result, H.replay = old_apply, old_replay
+    return r, lg, out, applied, arm
+
+
+def t8a_partial_solve(truth, plan):
+    r, lg, out, applied, arm = _abort_after(12, truth, plan)
+    t = lg.text()
+    check("8a abort after 12 good samples: count reported correctly (was 'only 0 good samples')",
+          r.get("n_samples") == 12 and "(12 good)" in t and "only 0" not in t, f"n_samples {r.get('n_samples')}")
+    check("8a partial sweep solved anyway, result reported", r.get("result") is not None and "aborted run, but 12 good samples" in t
+          and r["result"]["quality"]["grade"] in ("good", "ok"), r.get("result", {}).get("quality", {}).get("grade", "-") if r.get("result") else "-")
+    check("8a pcan reconnect failure -> hint 'CAN-Adapter direkt am Laptop anstecken (nicht am Hub)'",
+          "CAN-Adapter direkt am Laptop anstecken (nicht am Hub)" in t and r["rc"] == 3)
+    check("8a resume hint logged", f"--resume {out}" in t)
+    # real (non-sim) path: GOOD partial -> applied; OK partial -> not applied, 'apply available'
+    r, lg, out2, applied, _ = _abort_after(12, truth, plan, real=True, grade="good")
+    check("8a partial + GOOD -> applied automatically", len(applied) == 1)
+    r, lg, out3, applied, _ = _abort_after(12, truth, plan, real=True, grade="ok")
+    check("8a partial + OK -> NOT applied, 'apply available: <folder>' for the GUI button",
+          len(applied) == 0 and f"apply available: {out3}" in lg.text())
+    return out
+
+
+def t8b_too_few(truth, plan):
+    r, lg, out, _, _ = _abort_after(5, truth, plan)
+    t = lg.text()
+    check("8b abort after 5 good samples: not solved, 'need 10', resume hint", r.get("result") is None and "need 10" in t
+          and "--resume" in t and r.get("n_samples") == 5)
+    return out
+
+
+def t8c_resume(truth, plan, folder):
+    n0 = len(json.loads((Path(folder) / "samples.json").read_text())["samples"])
+    arm = H.SimArm(REST + [0.0], 4.0); lg = Logs()
+    r = H.run(yes=True, sim=True, sim_truth=truth, log=lg, arm=arm, cams=_sim_cams(arm, truth), resume=str(folder))
+    d = json.loads((Path(folder) / "samples.json").read_text())
+    ids = [x["i"] for x in d["samples"]]
+    check(f"8c resume continues with pose {n0 + 1} and appends (18 samples, no duplicates)",
+          f"continuing with pose {n0 + 1}/" in lg.text() and len(ids) == len(set(ids)) == 18 and ids[:n0] == list(range(1, n0 + 1)),
+          f"{len(ids)} samples")
+    check("8c resumed folder solves GOOD", r.get("result") is not None and r["result"]["quality"]["grade"] == "good" and r["rc"] == 0)
+
+
+def t8d_stop_partial(truth, plan):
+    r, lg, out, _, arm = _abort_after(11, truth, plan, kind="stop")
+    t = lg.text()
+    check("8d user STOP after 11 samples: motors off, then solved (rc 130 kept)", r["rc"] == 130 and "STOP: motors off now" in t
+          and r.get("result") is not None and arm.stop_calls >= 1)
+
+
+def test_8_partial_runs():
+    truth, plan = _tp()
+    folder = t8a_partial_solve(truth, plan); f5 = t8b_too_few(truth, plan); t8c_resume(truth, plan, f5); t8d_stop_partial(truth, plan)
+    _ok("8")
+
+
 if __name__ == "__main__":
     t0 = time.time()
     t1_pdf(); t2_real_overview()
@@ -364,6 +469,7 @@ if __name__ == "__main__":
     t6_executor_safety(truth, plan)
     t7a_old_ramp_reproduces_crash(); t7b_tracking_never_clamps(); t7c_stall_is_clean_and_named(); t7d_dead_follower()
     t7e_run_aborts_cleanly(truth, plan); t7f_auto_start_rolls(); t7g_board_not_found()
+    t8a_partial_solve(truth, plan); f5 = t8b_too_few(truth, plan); t8c_resume(truth, plan, f5); t8d_stop_partial(truth, plan)
     if "--quick" not in sys.argv:
         t4b_wrong_sign(plan)
         t7h_auto_end_to_end()

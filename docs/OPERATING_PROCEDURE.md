@@ -118,6 +118,11 @@ LeRobot's max_relative_target of 4°) and advances at most 6°/s (approach) or 1
 and the goal can never run ahead of the arm. (3.9 sent a precomputed ramp; LeRobot clamped it to 1° around the arm, the
 elbow could not lift from rest with only 1° of lead, and the run aborted on "lags 10 deg" – crash of 22:29.)
 
+Aborted run with saved poses (v3.9.2): with ≥ 10 good samples the result is computed anyway and shown in the box.
+GOOD is applied automatically; OK shows "✓ Übernehmen" (check the numbers first). To add the missing poses:
+`./handeye.sh run --resume vision/calibration/handeye/<folder>` (arm moves; continues after the last good pose).
+"pcan reconnect failed" = the CAN adapter dropped off USB: plug it directly into the laptop, not into the hub.
+
 **Manual override (old flow)**: ▶ START, aim the wrist camera at the board with the leader (gripper ~20 cm above the
 board centre, whole board in Kamera 1), **📍 Ziel-Pose übernehmen**, ■ STOPP. This ticks "Gespeicherte Ziel-Pose
 verwenden": 🤖 Auto-Kalibrierung … then plans from the taught pose (~40 s) and shows the plot + pose list before moving.

@@ -17,6 +17,7 @@ Commands (python = ~/humanoid/.venv/bin/python, run from anywhere):
   handeye.py plan --auto              offline preview of the automatic start (search pose, path from rest). No hardware.
   handeye.py run --auto [--yes]       automatic start + sweep. ARM MOVES.
   handeye.py run --sim --auto         the same with a simulated arm + rendered images.
+  handeye.py run --resume <folder>    v3.9.2: continue an aborted run with the pose after the last good one. ARM MOVES.
   handeye.py teach                    read the CURRENT arm pose from teleop telemetry (teleop running, wrist camera
                                       aimed at the board) and save it as the start/aim pose. Read-only.
   handeye.py plan [--dry-run]         plan the poses from the taught pose, check limits/height/paths, print the list
@@ -202,7 +203,7 @@ class BoardNotFound(RuntimeError):
 
 MSG_NO_ARM = "Roboterarm antwortet nicht – Strom prüfen"
 MSG_NO_BOARD = "Brett nicht gefunden – Brett im Blick der Handkamera?"
-_COMM_WORDS = ("timeout", "ack", "no feedback", "not connected", "callerror", "can bus", "comm_type")
+_COMM_WORDS = ("timeout", "ack", "no feedback", "not connected", "callerror", "can bus", "comm_type", "pcan", "reconnect")
 
 
 def _is_comm_error(e):
@@ -436,6 +437,7 @@ class Executor:
         self.t_start = time.time()
         self.sim_t = 0.0
         self.n_moves = 0
+        self.samples, self.rejected = [], []     # v3.9.2: kept on the executor so they survive an abort
         self._last_q, self._same_t0 = None, None
         mrt = np.asarray(getattr(arm, "mrt", [cfg.get("follower_mrt_deg", cfg["max_step_deg"])] * 7), float)
         # v3.9.1: the setpoint never leads the measured position by more than lead_frac * max_relative_target, so
@@ -697,8 +699,11 @@ class Executor:
         cv2.imwrite(str(self.out / f"rejected_wrist_{i:02d}.png"), b)
         return None
 
-    def run(self, plan, board):
+    def run(self, plan, board, start=1, samples=None, rejected=None):
+        """Sweep plan["poses"][start-1:]. samples / rejected: rows of an earlier, aborted run of the same folder
+        (v3.9.2 resume); new rows are appended and samples.json is rewritten after every pose."""
         self.out.mkdir(parents=True, exist_ok=True)
+        self.samples = list(samples or []); self.rejected = list(rejected or [])
         kin = Kin()
         q_teach = np.array(plan["q_teach"], float)
         q7, _ = self.read()
@@ -712,8 +717,10 @@ class Executor:
             self.log(f"start: current joints {np.round(q7[:6], 1).tolist()}, moving slowly "
                      f"({self.cfg.get('approach_speed_dps', 6.0):.0f} deg/s) to the taught pose (min clearance {clr:.0f} mm)")
         self.move_to(q_teach, grip, speed=self.cfg.get("approach_speed_dps", 6.0))
-        samples, rows = [], []
+        samples, rows = self.samples, self.rejected
         for i, p in enumerate(plan["poses"], 1):
+            if i < start:
+                continue
             self._check()
             self.log(f"pose {i}/{len(plan['poses'])}: height {p['height_mm']:.0f} mm, tilt {p['tilt_deg']:.0f}, roll {p['roll_deg']:.0f}")
             q_meas, ptp = self.move_to(p["q"], grip)
@@ -725,7 +732,7 @@ class Executor:
                 self.log(f"  ok: {c['corners']} corners, joints steady within {ptp:.2f} deg")
             else:
                 rows.append(row)
-            if i == 2 and not samples:
+            if i == 2 and start == 1 and not samples:
                 raise RuntimeError("the wrist camera does not see the board at the first poses: re-teach the aim pose")
             (self.out / "samples.json").write_text(json.dumps({"samples": samples, "rejected": rows, "plan": plan,
                                                                "board": board.spec}, indent=1))
@@ -854,17 +861,29 @@ def auto_preview(cfg=None, log=say):
 
 
 def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, plan=None, log=say, auto=False,
-        sim_guess=None, arm=None, cams=None, cam_model=None):
+        sim_guess=None, arm=None, cams=None, cam_model=None, resume=None):
     """auto=True (v3.9.1): no taught pose / plan needed - the executor finds the board itself (Executor.auto_start).
-    arm / cams / cam_model: test hooks (fake followers)."""
+    arm / cams / cam_model: test hooks (fake followers).
+    resume (v3.9.2): sample folder of an aborted run - continue with the pose after the last good one, append samples.
+    After ANY abort with >= min_samples_after_abort good samples the sweep is solved anyway; it is applied
+    automatically only if the quality is GOOD (OK -> 'apply available', GUI button Übernehmen)."""
     from charuco import Charuco
     cfg = HP.load_config()
-    if not auto:
+    prev = None
+    if resume:
+        prev = json.loads((Path(resume) / "samples.json").read_text())
+        plan, auto, out_dir = prev["plan"], False, resume
+        done = [r["i"] for r in prev["samples"]]
+        start = (max(done) + 1) if done else 1
+        if start > len(plan["poses"]):
+            raise RuntimeError(f"nothing to resume: all {len(plan['poses'])} poses of {resume} are done")
+        log(f"resume {resume}: {len(prev['samples'])} good samples so far, continuing with pose {start}/{len(plan['poses'])}")
+    if not auto and not resume:
         plan = plan or (json.loads(PLAN_JSON.read_text()) if PLAN_JSON.exists() else None)
         if plan is None:
             raise RuntimeError("no plan: run `handeye.py plan` first (or `run --auto`)")
     if not sim and arm is None:
-        if not auto:
+        if not auto and not resume:
             teach_q = load_teach()["q"]
             if np.max(np.abs(np.array(teach_q) - np.array(plan["q_teach"]))) > 0.01:
                 raise RuntimeError("the plan does not belong to the current taught pose: run `handeye.py plan` again")
@@ -921,11 +940,15 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
         log("RUNNING: auto calibration - STOP = motors off immediately")
         if auto:
             plan = ex.auto_start(board, guess=sim_guess, cam_model=cam_model)
-        samples = ex.run(plan, board)
+        if prev is not None:
+            ex.run(plan, board, start=start, samples=prev["samples"], rejected=prev.get("rejected", []))
+        else:
+            ex.run(plan, board)
     except Stop:
         log("STOP: motors off now"); arm.stop_now(); rc = 130
     except ArmUnresponsive as e:
         log(f"ERROR: {MSG_NO_ARM} ({e})"); rc = 3; off_only = True
+        _can_hint(e, log)
     except MotionAbort as e:
         log(f"ABORT: {e}"); rc = 1; off_only = True
     except BoardNotFound as e:
@@ -942,6 +965,7 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
             log("STOP: motors off now"); arm.stop_now(); rc = 130
         except ArmUnresponsive as e2:
             log(f"ERROR: {MSG_NO_ARM} ({e2})"); rc = 3; off_only = True
+            _can_hint(e2, log)
         except Exception as e2:
             log(f"return failed ({e2})"); off_only = True
     finally:
@@ -966,11 +990,36 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
             except Exception: pass
         if real_signals:
             signal.signal(signal.SIGINT, old[0]); signal.signal(signal.SIGTERM, old[1])
-    log(f"samples saved in {out}")
-    if len(samples) < 6:
-        log(f"only {len(samples)} good samples: not enough to calibrate"); return {"rc": rc or 2, "folder": str(out)}
-    r = replay(out, apply=apply_good and not sim, log=log)
-    return {"rc": rc, "folder": str(out), "result": r}
+    samples = ex.samples                    # v3.9.2: also after an abort (was always 0 then)
+    log(f"samples saved in {out} ({len(samples)} good)")
+    need = 6 if rc == 0 else int(cfg.get("min_samples_after_abort", 10))
+    if len(samples) < need:
+        log(f"only {len(samples)} good samples: not enough to calibrate (need {need})")
+        if rc != 0 and samples and plan is not None and len(samples) < len(plan["poses"]):
+            log(f"resume possible: ./handeye.sh run --resume {out}")
+        return {"rc": rc or 2, "folder": str(out), "n_samples": len(samples)}
+    if rc != 0:
+        log(f"aborted run, but {len(samples)} good samples: solving anyway (applied automatically only if GOOD)")
+    r = replay(out, apply=False, log=log)
+    grade = r["quality"]["grade"]
+    partial = rc != 0
+    if apply_good and not sim and (grade == "good" or (grade == "ok" and not partial)):
+        apply_result(r, log=log)
+    elif grade != "poor" and not sim:
+        log(f"not applied ({'partial run, ' if partial else ''}quality {grade.upper()})")
+        log(f"apply available: {out}")
+    else:
+        log("quality POOR: NOT applied (check the board is taped flat and visible; or `apply <folder> --force`)")
+    if partial and plan is not None and len(samples) < len(plan["poses"]):
+        log(f"resume possible: ./handeye.sh run --resume {out}")
+    return {"rc": rc, "folder": str(out), "result": r, "n_samples": len(samples)}
+
+
+def _can_hint(e, log):
+    """v3.9.2: the PCAN/XCAN adapter dropped off USB (seen 23:16 with the adapter on the USB 2.0 hub)."""
+    s = str(e).lower()
+    if "pcan" in s or "reconnect" in s or "can bus" in s:
+        log("HINWEIS: CAN-Adapter direkt am Laptop anstecken (nicht am Hub)")
 
 
 # ---------------------------------------------------------------- solve / apply
@@ -1013,6 +1062,7 @@ def main():
     ap.add_argument("--yes", action="store_true", help="run: no terminal confirmation (the GUI asks instead)")
     ap.add_argument("--sim", action="store_true", help="run: simulated arm + rendered images")
     ap.add_argument("--auto", action="store_true", help="plan/run: automatic start (find the board, no taught pose)")
+    ap.add_argument("--resume", metavar="FOLDER", help="run: continue an aborted run (next pose after the last good one)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--no-apply", action="store_true")
     ap.add_argument("--port", type=int)
@@ -1044,7 +1094,9 @@ def main():
                     SY.compare(truth, r["result"])
                 sys.exit(0 if r and r.get("rc", 1) == 0 else 1)
             else:
-                r = run(yes=a.yes, apply_good=not a.no_apply, auto=a.auto)
+                r = run(yes=a.yes, apply_good=not a.no_apply, auto=a.auto, resume=a.resume)
+                if r and r.get("result") is not None and r["rc"] != 0:
+                    sys.exit(5)            # aborted, but solved from the partial sweep
                 sys.exit(0 if r and r.get("rc", 1) == 0 else 1)
         elif a.cmd == "replay":
             replay(a.folder, apply=False)

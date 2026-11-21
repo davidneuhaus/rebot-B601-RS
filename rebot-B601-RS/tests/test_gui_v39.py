@@ -84,8 +84,11 @@ if ok:
     # --- stop test
     ac.go(); pump(4.0)
     t0 = time.time(); ac.stop()
-    ok = pump(5, lambda: ac.proc is None)
-    check(f"STOPP ends the run within 2 s ({time.time() - t0:.1f} s)", ok and time.time() - t0 < 2.5)
+    ok = pump(5, lambda: ac.motors_off or ac.proc is None)
+    check(f"STOPP: motors off within 2 s ({time.time() - t0:.1f} s)", ok and time.time() - t0 < 2.5)
+    # v3.9.2: with >= 10 good samples the process solves the partial sweep after the stop, then ends by itself
+    ok = pump(120, lambda: ac.proc is None)
+    check(f"after STOPP the process ends (partial sweep solved if >= 10 samples) ({' | '.join(ac.result_lines)[:100]})", ok)
 # --- v3.9.1: automatic start end-to-end (handeye.sh run --yes --auto --sim)
 ac.use_teach.set(False)
 ac.plan()
