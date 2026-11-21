@@ -24,6 +24,8 @@
  "max_roll_from_teach_deg": 40.0,
  "joint_margin_deg": 5.0,
  "speed_dps": 12.0,
+ "low_speed_dps": 8.0,
+ "low_height_mm": 160,
  "max_step_deg": 1.0,
  "settle_s": 1.0,
  "reach_tol_deg": 2.0,

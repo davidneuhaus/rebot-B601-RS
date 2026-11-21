@@ -392,3 +392,22 @@ the leader.
 - Faster saves (in-process video encoding, ~2 s instead of 13-17 s per short episode); scrollable window that fits 1080p.
 - Installed lerobot[dataset] (datasets was missing, so recording could not work on the laptop); numpy/opencv pins kept.
 - Docs: docs/APP_V3_8.md, ~/humanoid/docs/OPERATING_PROCEDURE.md.
+
+## 3.9.3 – 2026-11-21 (laptop) – auto calibration: 'kraeftig' profile, 8 deg/s near the board
+- Two real runs (23:15, 23:35) died on the move pose 13 -> 14 ("pcan reconnect failed", then "motor feedback frozen
+  1.0 s"; arm went limp). David's hint: earlier teleop drops happened with the 'vorsichtig' profile.
+- Findings: the profiles (teleop.sh vorsichtig/mittel/kraeftig) differ only in gripper settings (kp 10 vs 12, closing
+  cap GRIPPER_CLOSE_TQ 1.1 Nm vs none). Arm kp/kd (MIT_*), collision guard and gravity feedforward (x0.8) come from the
+  same teleop.sh exports for every profile. The guard did not fire in either run (no KOLLISION lines) and it only
+  freezes (holds position), it never switches torque off. The 15:37 teleop drop ('vorsichtig', safe_zero rest move)
+  was the same "pcan reconnect failed" + "control ack timeout" pattern. Gravity load at pose 14 is moderate
+  (shoulder_lift 8.6 Nm vs 11.6 Nm at other 150 mm poses); pose 5 has the same joints (only wrist_roll differs) and was
+  fine in both runs. Pose 14 is the first move of wrist_roll into +20..40 deg.
+- Change: handeye.sh now always uses the 'kraeftig' (factory) profile: gripper kp 12, no extra closing cap (the
+  gripper is held where it is; inherited GRIPPER_CLOSE_TQ / PLAY_GRIPPER_* values are overridden). It prints
+  "Arm-Profil: kraeftig ...". Guard and its safety aborts are unchanged.
+- Sweep moves that end at <= 160 mm (`low_height_mm`) run at 8 deg/s (`low_speed_dps`); poses unchanged.
+- Sim: a GOOD simulated run no longer prints "quality POOR: NOT applied" (now "simulation: quality GOOD, not applied").
+- Tests: vision/tests/test_handeye.py section 9 (profile + low speed); pytest 15/15; `run --sim --auto` GOOD.
+  GUI test not run (no GUI change, no visible windows).
+- Snapshots: versions/before_v3_9_3, versions/v3_9_3.

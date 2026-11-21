@@ -459,6 +459,32 @@ def test_8_partial_runs():
     _ok("8")
 
 
+# ---------------------------------------------------------------- 9. v3.9.3: 'kraeftig' profile, slower near the board
+def t9a_profile():
+    sh = (Path(__file__).resolve().parents[2] / "handeye.sh").read_text()
+    check("9a handeye.sh uses the 'kraeftig' profile (CLOSE=0, KP=12) and forces it (no inherited 'vorsichtig' cap)",
+          "CLOSE=0; KP=12.0; TQ=3.5; HOLD=1.0" in sh and "GRIPPER_CLOSE_TQ=$CLOSE" in sh and "PLAY_GRIPPER_KP=$KP " in sh)
+
+
+def t9b_low_speed(truth, plan):
+    arm = H.SimArm(REST + [0.0], 4.0); ex = _ex(arm, cams=_sim_cams(arm, truth))
+    speeds = []; orig = ex.move_to
+    def spy(q, grip, speed=None):
+        speeds.append(speed); return orig(q, grip, speed=speed)
+    ex.move_to = spy
+    try:
+        ex.run(plan, C.Charuco())
+    except Exception as e:
+        check("9b sweep runs", False, f"{type(e).__name__}: {e}"[:140]); return
+    sweep = speeds[1:-1]; hs = [p["height_mm"] for p in plan["poses"]]
+    exp = [8.0 if h <= 160 else None for h in hs]
+    check("9b sweep moves ending at <= 160 mm run at 8 deg/s, others at the normal speed", sweep == exp and 8.0 in exp and None in exp, f"{sweep} vs {exp}")
+
+
+def test_9_kraeftig_low_speed():
+    truth, plan = _tp(); t9a_profile(); t9b_low_speed(truth, plan); _ok("9")
+
+
 if __name__ == "__main__":
     t0 = time.time()
     t1_pdf(); t2_real_overview()
@@ -470,6 +496,7 @@ if __name__ == "__main__":
     t7a_old_ramp_reproduces_crash(); t7b_tracking_never_clamps(); t7c_stall_is_clean_and_named(); t7d_dead_follower()
     t7e_run_aborts_cleanly(truth, plan); t7f_auto_start_rolls(); t7g_board_not_found()
     t8a_partial_solve(truth, plan); f5 = t8b_too_few(truth, plan); t8c_resume(truth, plan, f5); t8d_stop_partial(truth, plan)
+    t9a_profile(); t9b_low_speed(truth, plan)
     if "--quick" not in sys.argv:
         t4b_wrong_sign(plan)
         t7h_auto_end_to_end()

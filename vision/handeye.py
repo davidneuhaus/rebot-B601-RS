@@ -723,7 +723,8 @@ class Executor:
                 continue
             self._check()
             self.log(f"pose {i}/{len(plan['poses'])}: height {p['height_mm']:.0f} mm, tilt {p['tilt_deg']:.0f}, roll {p['roll_deg']:.0f}")
-            q_meas, ptp = self.move_to(p["q"], grip)
+            low = p.get("height_mm", 1e9) <= self.cfg.get("low_height_mm", 160)   # v3.9.3: slower near the board
+            q_meas, ptp = self.move_to(p["q"], grip, speed=(min(self.cfg.get("low_speed_dps", 8.0), self.cfg["speed_dps"]) if low else None))
             hold = lambda: self.command(np.append(np.array(p["q"]), grip))
             c = self.capture(i, board, hold)
             row = {"i": i, "q": q_meas.tolist(), "q_planned": p["q"], "joint_ptp_deg": ptp, "time": time.time()}
@@ -1005,7 +1006,9 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
     partial = rc != 0
     if apply_good and not sim and (grade == "good" or (grade == "ok" and not partial)):
         apply_result(r, log=log)
-    elif grade != "poor" and not sim:
+    elif sim:
+        log(f"simulation: quality {grade.upper()}, not applied")   # v3.9.3: sim used to print 'quality POOR' here
+    elif grade != "poor":
         log(f"not applied ({'partial run, ' if partial else ''}quality {grade.upper()})")
         log(f"apply available: {out}")
     else:

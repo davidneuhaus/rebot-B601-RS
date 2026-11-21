@@ -1,0 +1,33 @@
+{
+  "_doc": "Per-object grasp profiles. A profile is chosen by the first 'match' substring found in the detected label, else 'default'. All lengths in mm. width_mm: nominal width across the jaws (null = use the width measured by locate.py). insert_depth_mm: how far BELOW the object's top face the fingertips go. approach_open_mm = width + approach_open_margin_mm (jaws open before descending). release_width_mm: jaw opening when placing. top_height_mm: height of the object's top face above the table (the grasp plane for pixel->3D). squeeze_mm: closing target = width - squeeze_mm.",
+  "gripper": {
+    "_doc": "Linear map jaw opening (mm) -> gripper command (deg, as in get_observation 'gripper.pos'). PLACEHOLDER, calibrated=false: measure closed/open once with the real gripper and fill in. The planner warns while calibrated=false.",
+    "calibrated": false,
+    "closed_mm": 0.0, "closed_cmd_deg": 0.0,
+    "max_open_mm": 100.0, "max_open_cmd_deg": 270.0
+  },
+  "motion": {
+    "min_tip_clearance_mm": 12.0,
+    "approach_height_mm": 80.0,
+    "lift_height_mm": 80.0,
+    "cartesian_step_mm": 25.0,
+    "speed_scale": {"approach": 1.0, "descend": 0.4, "close": 0.0, "lift": 0.5, "place": 0.4, "return": 0.8}
+  },
+  "check": {
+    "settle_s": 0.6,
+    "width_tolerance_mm": 6.0,
+    "retries": 1
+  },
+  "profiles": {
+    "default": {"match": [], "width_mm": null, "top_height_mm": 30.0, "insert_depth_mm": 15.0,
+                "approach_open_margin_mm": 25.0, "release_width_mm": null, "squeeze_mm": 1.0},
+    "block": {"match": ["block", "cube", "box"], "width_mm": null, "top_height_mm": 30.0, "insert_depth_mm": 15.0,
+              "approach_open_margin_mm": 20.0, "release_width_mm": null, "squeeze_mm": 1.0},
+    "cup": {"match": ["cup", "mug", "tin", "can"], "width_mm": null, "top_height_mm": 80.0, "insert_depth_mm": 25.0,
+            "approach_open_margin_mm": 30.0, "release_width_mm": null, "squeeze_mm": 2.0},
+    "bottle": {"match": ["bottle"], "width_mm": null, "top_height_mm": 150.0, "insert_depth_mm": 30.0,
+               "approach_open_margin_mm": 30.0, "release_width_mm": null, "squeeze_mm": 2.0},
+    "flat": {"match": ["card", "book", "tape", "pen"], "width_mm": null, "top_height_mm": 8.0, "insert_depth_mm": 6.0,
+             "approach_open_margin_mm": 20.0, "release_width_mm": null, "squeeze_mm": 0.5}
+  }
+}
