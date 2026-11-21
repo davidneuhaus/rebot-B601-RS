@@ -45,7 +45,7 @@
    "title": "Humanoid Logbook",
    "intro": "We are teaching a robot arm not just to execute tasks but to **learn** them: **Seeed reBot B601-RS**, **LeRobot**, teleoperation with a leader arm, recording demonstrations and training locally on a Mac mini. This logbook records every working day – mindset, wins, fails and learnings – so you can rebuild it yourself.",
    "status": {
-    "Phase": "Camera calibration",
+    "Phase": "Camera calibration (grasping groundwork started)",
     "Arm": "reBot B601-RS + reBot 102 (leader)",
     "Software": "LeRobot 0.7.x, teleop app 3.8",
     "Training": "1 ACT run, untested on the arm",
@@ -57,7 +57,7 @@
    "title": "Humanoid-Logbuch",
    "intro": "Wir bringen einem Roboterarm bei, Aufgaben nicht nur auszuführen, sondern zu **lernen**: **Seeed reBot B601-RS**, **LeRobot**, Teleoperation per Leader-Arm, Demonstrationen aufnehmen und lokal auf dem Mac mini trainieren. Dieses Logbuch hält jeden Arbeitstag fest – mit Denkweise, Wins, Fails und Learnings –, damit du es nachbauen kannst.",
    "status": {
-    "Phase": "Kamera-Kalibrierung",
+    "Phase": "Kamera-Kalibrierung (Greif-Grundlagen begonnen)",
     "Arm": "reBot B601-RS + reBot 102 (Leader)",
     "Software": "LeRobot 0.7.x, Teleop-App 3.8",
     "Training": "1 ACT-Lauf, am Arm ungetestet",
@@ -65,5 +65,6 @@
    },
    "about": "Dieses Logbuch dokumentiert das Humanoid-Projekt von David Neuhaus. Projektstart war laut Notizen der 9. November 2026. Es gibt einen Eintrag pro Arbeitstag mit mehr als etwa einer Stunde Arbeit – und zwar ehrlich: mit Fehlschlägen, Unsicherheiten und geschätzten Arbeitszeiten.\n\nDie Einträge folgen immer derselben Struktur, damit man das Projekt Schritt für Schritt nachvollziehen kann. Für den 14. sowie den 17.–20. November gibt es keine Arbeitsprotokolle; dort könnte es undokumentierte Arbeit geben."
   }
- }
+ },
+ "contact_email": "david.neuhaus.agent@gmail.com"
 }
