@@ -85,7 +85,7 @@ T = {
   progress="Progress", entries="Entries", last="Last entry", timeline="Timeline", chapters="Chapters",
   prev="← Previous day", next="Next day →", endnote="End of the logbook so far", back="Back to overview",
   footer="Humanoid Logbook · a project by {a} · draft, built locally on {d}", about_k="About the project", about_h="Why this logbook?",
-  notpub="Not published yet", pubtxt="Code will be published once approved.", gh="Open GitHub repo ↗", fol_h="Follow along", fol_p="The code and this logbook live on GitHub. Star the repo to bookmark it, or hit Watch to get notified about new activity.", fol_star="★ Star on GitHub", fol_watch="Watch for updates", fol_feed="Atom feed of commits", fol_code="Code on GitHub", ghabout="Code on GitHub ↗", page_about="About the project", contact="Contact", lic="MIT License", lic_p="Code is open source under the MIT License.", contact_p="Questions or feedback?"),
+  notpub="Not published yet", pubtxt="Code will be published once approved.", gh="Open GitHub repo ↗", fol_h="Follow along", fol_p="The code and this logbook live on GitHub. Star the repo to bookmark it, or hit Watch to get notified about new activity.", fol_star="★ Star on GitHub", fol_watch="Watch for updates", fol_feed="Atom feed of commits", fol_code="Code on GitHub", ghabout="Code on GitHub ↗", page_about="About the project", contact="Contact", ct_p="Questions or ideas? The best place is GitHub:", ct_issues="open an issue", ct_disc="join the Discussions", ct_mail="Prefer email? Write to", lic="MIT License", lic_p="Code is open source under the MIT License.", contact_p="Questions or feedback?"),
  "de": dict(
   sections=["Was wir gemacht haben","Denkweise","Wins","Fails","Learnings","Quellen","Code-Stand"],
   months="Januar Februar März April Mai Juni Juli August September Oktober November Dezember".split(),
@@ -96,12 +96,20 @@ T = {
   progress="Fortschritt", entries="Einträge", last="Letzter Eintrag", timeline="Zeitleiste", chapters="Kapitel",
   prev="← Vorheriger Tag", next="Nächster Tag →", endnote="Ende des bisherigen Logbuchs", back="Zurück zur Übersicht",
   footer="Humanoid-Logbuch · ein Projekt von {a} · Entwurf, lokal gebaut am {d}", about_k="Über das Projekt", about_h="Warum dieses Logbuch?",
-  notpub="Noch nicht veröffentlicht", pubtxt="Code wird veröffentlicht, sobald freigegeben.", gh="GitHub-Repo öffnen ↗", fol_h="Dabei bleiben", fol_p="Code und dieses Logbuch liegen auf GitHub. Gib dem Repo einen Stern als Lesezeichen oder klick auf „Watch“, um über Neues informiert zu werden.", fol_star="★ Stern auf GitHub", fol_watch="Updates verfolgen (Watch)", fol_feed="Atom-Feed der Commits", fol_code="Code auf GitHub", ghabout="Code auf GitHub ↗", page_about="Über das Projekt", contact="Kontakt", lic="MIT-Lizenz", lic_p="Der Code ist Open Source unter der MIT-Lizenz.", contact_p="Fragen oder Feedback?"),
+  notpub="Noch nicht veröffentlicht", pubtxt="Code wird veröffentlicht, sobald freigegeben.", gh="GitHub-Repo öffnen ↗", fol_h="Dabei bleiben", fol_p="Code und dieses Logbuch liegen auf GitHub. Gib dem Repo einen Stern als Lesezeichen oder klick auf „Watch“, um über Neues informiert zu werden.", fol_star="★ Stern auf GitHub", fol_watch="Updates verfolgen (Watch)", fol_feed="Atom-Feed der Commits", fol_code="Code auf GitHub", ghabout="Code auf GitHub ↗", page_about="Über das Projekt", contact="Kontakt", ct_p="Fragen oder Ideen? Am besten über GitHub:", ct_issues="ein Issue eröffnen", ct_disc="in den Discussions mitreden", ct_mail="Lieber per E-Mail? Schreib an", lic="MIT-Lizenz", lic_p="Der Code ist Open Source unter der MIT-Lizenz.", contact_p="Fragen oder Feedback?"),
 }
 
-def contact_link(t):
+def contact_block(t):
     m = CFG.get("contact_email")
-    return f'<a href="mailto:{E(m)}">{t["contact"]}</a>' if m else ""
+    if not m: return ""
+    u, d = m.split("@"); r = lambda x: x[::-1]
+    u2 = E(r(u)); d2 = E(r(d)); u_s = E(u); d_s = E(d.replace(".", " [dot] "))
+    gh = E(CFG["repo"]).rstrip("/")
+    disc = f' · <a href="{gh}/discussions">{t["ct_disc"]}</a>' if CFG.get("repo_public") else ""
+    return (f'<h2>{t["contact"]}</h2><p>{t["ct_p"]} <a href="{gh}/issues">{t["ct_issues"]}</a>{disc}.</p>'
+            f'<p>{t["ct_mail"]} <span class="obf" data-u="{u2}" data-d="{d2}">{u_s} [at] {d_s}</span></p>'
+            """<script>document.querySelectorAll('.obf').forEach(function(e){var r=function(x){return x.split('').reverse().join('')};"""
+            """var a=r(e.dataset.u)+String.fromCharCode(64)+r(e.dataset.d);var l=document.createElement('a');l.href='mail'+'to:'+a;l.textContent=a;e.replaceWith(l)})</script>""")
 
 def lic_link(t):
     if not CFG.get("repo_public"): return ""
@@ -113,7 +121,7 @@ def follow(t):
     return (f'<section class="wrap follow"><div class="card"><h2>{t["fol_h"]}</h2><p>{t["fol_p"]} {t["lic_p"]}</p>'
             f'<p class="code-links"><a class="btn" href="{u}">{t["fol_code"]} ↗</a> <a class="btn ghost" href="{u}/stargazers">{t["fol_star"]}</a> '
             f'<a class="btn ghost" href="{u}/subscription">{t["fol_watch"]}</a> <a class="btn ghost" href="{u}/commits/main.atom">{t["fol_feed"]}</a></p>'
-            + (f'<p class="contact">{t["contact_p"]} {contact_link(t)}: <a href="mailto:{E(CFG["contact_email"])}">{E(CFG["contact_email"])}</a></p>' if CFG.get("contact_email") else "") + '</div></section>')
+            + '</div></section>')
 
 def layout(L, title, body, depth, active, path, desc=""):
     t = T[L]; r = "../"*depth                    # root of this language
@@ -128,7 +136,7 @@ def layout(L, title, body, depth, active, path, desc=""):
 <body><header class="top"><a class="brand" href="{r}index.html"><span class="dot"></span>{t["brand"]}</a><nav>{nav}{sw}</nav></header>
 {body}
 {follow(t)}
-<footer><p>{foot}{(" · "+contact_link(t)) if CFG.get("contact_email") else ""}{lic_link(t)}</p></footer>
+<footer><p>{foot}{lic_link(t)}</p></footer>
 <script src="{root}assets/app.js"></script></body></html>'''
 
 def load(L):
@@ -192,7 +200,7 @@ def build_lang(L):
     (O/"index.html").write_text(layout(L, I["title"], home, 0, "home", "index.html", I["intro"]), encoding="utf-8")
     codeabout = f'<p><a class="btn" href="{E(CFG["repo"])}">{t["ghabout"]}</a></p>' if CFG.get("repo_public") else f'<p class="code-note"><span>{t["notpub"]}</span> {t["pubtxt"]}</p>'
     about = f'''<main class="wrap narrow"><article class="entry"><header class="entry-head"><p class="kicker">{t["about_k"]}</p><h1>{t["about_h"]}</h1></header>
-{md(I["about"], "media/")}{codeabout}</article></main>'''
+{md(I["about"], "media/")}{codeabout}{contact_block(t)}</article></main>'''
     (O/"about.html").write_text(layout(L, f'{t["page_about"]} – {t["brand"]}', about, 0, "about", "about.html"), encoding="utf-8")
     return n
 
