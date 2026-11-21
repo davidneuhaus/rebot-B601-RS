@@ -85,7 +85,7 @@ T = {
   progress="Progress", entries="Entries", last="Last entry", timeline="Timeline", chapters="Chapters",
   prev="← Previous day", next="Next day →", endnote="End of the logbook so far", back="Back to overview",
   footer="Humanoid Logbook · a project by {a} · draft, built locally on {d}", about_k="About the project", about_h="Why this logbook?",
-  notpub="Not published yet", pubtxt="Code will be published once approved.", gh="Open GitHub repo ↗", ghabout="Code on GitHub ↗", page_about="About the project"),
+  notpub="Not published yet", pubtxt="Code will be published once approved.", gh="Open GitHub repo ↗", fol_h="Follow along", fol_p="The code and this logbook live on GitHub. Star the repo to bookmark it, or hit Watch to get notified about new activity.", fol_star="★ Star on GitHub", fol_watch="Watch for updates", fol_feed="Atom feed of commits", fol_code="Code on GitHub", ghabout="Code on GitHub ↗", page_about="About the project"),
  "de": dict(
   sections=["Was wir gemacht haben","Denkweise","Wins","Fails","Learnings","Quellen","Code-Stand"],
   months="Januar Februar März April Mai Juni Juli August September Oktober November Dezember".split(),
@@ -96,8 +96,15 @@ T = {
   progress="Fortschritt", entries="Einträge", last="Letzter Eintrag", timeline="Zeitleiste", chapters="Kapitel",
   prev="← Vorheriger Tag", next="Nächster Tag →", endnote="Ende des bisherigen Logbuchs", back="Zurück zur Übersicht",
   footer="Humanoid-Logbuch · ein Projekt von {a} · Entwurf, lokal gebaut am {d}", about_k="Über das Projekt", about_h="Warum dieses Logbuch?",
-  notpub="Noch nicht veröffentlicht", pubtxt="Code wird veröffentlicht, sobald freigegeben.", gh="GitHub-Repo öffnen ↗", ghabout="Code auf GitHub ↗", page_about="Über das Projekt"),
+  notpub="Noch nicht veröffentlicht", pubtxt="Code wird veröffentlicht, sobald freigegeben.", gh="GitHub-Repo öffnen ↗", fol_h="Dabei bleiben", fol_p="Code und dieses Logbuch liegen auf GitHub. Gib dem Repo einen Stern als Lesezeichen oder klick auf „Watch“, um über Neues informiert zu werden.", fol_star="★ Stern auf GitHub", fol_watch="Updates verfolgen (Watch)", fol_feed="Atom-Feed der Commits", fol_code="Code auf GitHub", ghabout="Code auf GitHub ↗", page_about="Über das Projekt"),
 }
+
+def follow(t):
+    if not CFG.get("repo_public"): return ""
+    u = E(CFG["repo"]).rstrip("/")
+    return (f'<section class="wrap follow"><div class="card"><h2>{t["fol_h"]}</h2><p>{t["fol_p"]}</p>'
+            f'<p class="code-links"><a class="btn" href="{u}">{t["fol_code"]} ↗</a> <a class="btn ghost" href="{u}/stargazers">{t["fol_star"]}</a> '
+            f'<a class="btn ghost" href="{u}/subscription">{t["fol_watch"]}</a> <a class="btn ghost" href="{u}/commits/main.atom">{t["fol_feed"]}</a></p></div></section>')
 
 def layout(L, title, body, depth, active, path, desc=""):
     t = T[L]; r = "../"*depth                    # root of this language
@@ -111,6 +118,7 @@ def layout(L, title, body, depth, active, path, desc=""):
 <title>{E(title)}</title><meta name="description" content="{E(desc)}"><link rel="stylesheet" href="{root}assets/style.css"></head>
 <body><header class="top"><a class="brand" href="{r}index.html"><span class="dot"></span>{t["brand"]}</a><nav>{nav}{sw}</nav></header>
 {body}
+{follow(t)}
 <footer><p>{foot}</p></footer>
 <script src="{root}assets/app.js"></script></body></html>'''
 
@@ -184,5 +192,6 @@ def main():
     CFG = json.loads((ROOT/"project.json").read_text(encoding="utf-8"))
     SITE.mkdir(exist_ok=True); (SITE/"assets").mkdir(exist_ok=True); (SITE/"media").mkdir(exist_ok=True)
     for f in ASSETS.glob("*"): shutil.copy(f, SITE/"assets"/f.name)
+    (SITE/".nojekyll").write_text("")
     for L in ("en","de"): print(L, build_lang(L), "entries")
 main()

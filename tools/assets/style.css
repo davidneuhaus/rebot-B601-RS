@@ -61,3 +61,4 @@ footer{text-align:center;color:var(--mute);font:13px var(--sans);padding:40px 16
 figure.small{max-width:380px;margin-left:auto;margin-right:auto}
 .lang{display:inline-flex;align-items:center;gap:2px;margin-left:10px;font:600 12px var(--sans);border:1px solid var(--line);border-radius:99px;padding:2px 4px}.lang i{color:var(--line);font-style:normal}
 .top nav .lang a{padding:3px 8px;font-size:12px}
+.follow{margin:2rem auto}.follow .card p{margin:.5rem 0}.follow .code-links{display:flex;flex-wrap:wrap;gap:.6rem}
