@@ -430,3 +430,37 @@ the leader.
 - Tests: tools/tests/test_drop_diag.py 6/6 (fake motors, all verdicts); vision/tests/test_handeye.py 15/15.
 - Snapshots: versions/before_v3_9_4, versions/v3_9_4.
 
+## 3.9.5 – 2026-11-22 00:25 (laptop) – camera outage hold/wait, watchdog, soft stop, connect timeout, GUI layout
+- Finding (00:08 run, 3.9.4 monitor): during the move to pose 2 the wrist camera (Innomaker) dropped off USB 5 times in
+  30 s (detach/attach 00:08:54 - 00:09:26, same hub as the XCAN adapter; the CAN adapter stayed enumerated); GUI wrist
+  frames stalled 35.7 s. handeye.py hung with the motors on and STOP had no effect; the GUI killed it after 1.5 s.
+  The 3.9.4 motor trace was 64 KB-buffered and lost its last ~2 s at the kill (it ends mid-line), so the exact blocking
+  call is unknown (no stack: the process was gone). The Python signal handler only runs when the main thread returns,
+  so it was blocked in a C call (CAN driver).
+- Finding (00:15, 00:19 runs): hang at "connecting the follower"; `sample` showed the main thread in
+  PcanBus::open -> libPCBUSB CAN_Initialize -> pcan_usb_drv_open_device (adapter stuck after the hard stop).
+- Connect timeout: `RealArm` connects in a worker thread (`connect_timeout_s` 10 s); on timeout
+  "ERROR: CAN-Adapter hängt – XCAN kurz ab- und wieder anstecken, dann neu starten" and exit 3 (no torque was enabled).
+- Camera waits (`Executor._grab`) run in a thread while the arm holds the pose and the motors are read every cycle
+  (also in the auto start). Stall: "Kamera weg – warte…" / "Kamera wieder da – weiter"; after `frame_wait_s` 60 s
+  the same pose is retried; after `camera_lost_s` 90 s in total `CameraLost` -> soft stop. `FrameTimeout` for grab
+  timeouts; `ShmSource` re-attaches the GUI's shared memory after 1 s without a new frame (GUI reload recreates it).
+- `Watchdog` thread: no motor read for 1 s -> "WATCHDOG: …" + faulthandler stack dump of all threads into the log;
+  STOP (SIGINT/SIGTERM seen via `signal.set_wakeup_fd`, works while the main thread is blocked) without a motor read
+  for 2 s, or no read for 10 s -> torque off from the watchdog thread, exit 130 / 3.
+- Soft stop: flag file `~/humanoid/tmp/handeye_softstop` (GUI "⏸ Stopp & zurück"): sweep aborted, samples.json
+  written, slow return (approach speed 6 deg/s, path-checked, same clamp + guard) to the taught pose, then to the start
+  pose of the run, then the plugin rest move and torque off; solved if >= 10 samples, otherwise `--resume`. Every other
+  generic abort while the motors answer (camera outage, time limit) ends the same way; MotionAbort / ArmUnresponsive
+  during the return -> motors off (unchanged). Red STOPP stays the instant motors-off.
+- Motor trace line-buffered. New config keys: connect_timeout_s, frame_timeout_s, frame_wait_s, camera_lost_s,
+  watchdog_warn_s, watchdog_hard_s.
+- GUI (`gui_v39.py`): "Gespeicherte Ziel-Pose verwenden" on its own row below the buttons (was cut off); the button
+  row wraps on narrow windows and the status text wraps to the window width; new button "⏸ Stopp & zurück" next to
+  the red STOPP; camera / watchdog / soft-stop lines show in the status. Active after "App neu laden".
+- Tests: vision/tests/test_handeye_v395.py (camera wait/retry/lost, shm re-attach, watchdog warn/hard/STOP, SIGUSR
+  ignored, soft-stop flag, soft stop end-to-end in sim, connect timeout with a fake robot), vision/tests/test_handeye.py,
+  tools/tests/test_drop_diag.py. No test opens the PCAN device (checked with lsof: libPCBUSB not loaded by pytest).
+  GUI not started for a test (David's app is running), syntax-checked only.
+- Snapshots: versions/before_v3_9_5, versions/v3_9_5.
+

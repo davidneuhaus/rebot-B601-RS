@@ -61,6 +61,9 @@ MOTORS = ARM_JOINTS + ["gripper"]
 DEFAULT_DIRECTIONS = {"shoulder_pan": 1.0, "shoulder_lift": 1.0, "elbow_flex": -1.0, "wrist_flex": -1.0,
                       "wrist_yaw": -1.0, "wrist_roll": 1.0, "gripper": 6.0}
 FWD_PORT = int(os.environ.get("TELEMETRY_FWD_PORT", "8766"))
+# v3.9.5 soft stop ("⏸ Stopp & zurück" in the GUI): the GUI creates this file; handeye.py aborts the sweep, saves the
+# samples and drives slowly back (taught pose -> start pose -> plugin rest move), then torque off
+SOFTSTOP_FLAG = Path(os.environ.get("HANDEYE_SOFTSTOP_FLAG", str(HUM / "tmp" / "handeye_softstop")))
 
 
 def say(msg):
@@ -121,22 +124,43 @@ def make_plan(q_teach=None, out_json=PLAN_JSON, out_png=PLAN_PNG, log=say):
 
 
 # ---------------------------------------------------------------- cameras
+class FrameTimeout(RuntimeError):
+    """v3.9.5: no fresh camera frame within the grab timeout (camera re-enumerating, GUI reopening it)."""
+
+
 class ShmSource:
-    """Newest frame of the GUI's shared memory (640x360), no camera access."""
-    def __init__(self, role):
+    """Newest frame of the GUI's shared memory (640x360), no camera access.
+    v3.9.5: when no new frame arrives for reattach_s, the block is re-attached (the GUI may have recreated it after a
+    reload / camera reconnect - the old mapping then never changes again)."""
+    def __init__(self, role, reattach_s=1.0):
         import camera_feeds as cf
+        self.cf = cf
         self.r = cf.ShmReader(role); self.role = role; self.seq = -1
+        self.reattach_s, self.t_new = reattach_s, time.time()
+
+    def _reattach(self):
+        try:
+            r = self.cf.ShmReader(self.role)
+        except Exception:
+            return
+        try: self.r.close()
+        except Exception: pass
+        self.r, self.seq = r, -1
 
     def grab(self, after_ts=0.0, timeout=3.0):
         t_end = time.time() + timeout
+        t_try = time.time() + self.reattach_s
         while time.time() < t_end:
             x = self.r.read(self.seq)
             if x is not None:
                 self.seq, ts, img = x
+                self.t_new = time.time()
                 if ts >= after_ts:
                     return img, ts
+            elif time.time() >= t_try and time.time() - self.t_new >= self.reattach_s:
+                self._reattach(); t_try = time.time() + self.reattach_s
             time.sleep(0.005)
-        raise RuntimeError(f"no fresh frame from GUI camera '{self.role}'")
+        raise FrameTimeout(f"no fresh frame from GUI camera '{self.role}'")
 
     def close(self):
         self.r.close()
@@ -168,7 +192,7 @@ class DirectSource:
             if self.frame is not None and self.ts >= after_ts:
                 return self.frame.copy(), self.ts
             time.sleep(0.01)
-        raise RuntimeError("no fresh camera frame")
+        raise FrameTimeout("no fresh camera frame")
 
     def close(self):
         self.stop = True; time.sleep(0.1); self.cap.release()
@@ -191,6 +215,13 @@ def open_cameras():
 # ---------------------------------------------------------------- robot wrappers
 class ArmUnresponsive(RuntimeError):
     """The motors stopped answering (power cut, CAN cable, ack timeouts, frozen feedback)."""
+
+
+MSG_CAN_HUNG = "CAN-Adapter hängt – XCAN kurz ab- und wieder anstecken, dann neu starten"
+
+
+class CanAdapterHung(RuntimeError):
+    """v3.9.5: the PCAN driver did not return from opening the adapter (connect timeout)."""
 
 
 class MotionAbort(RuntimeError):
@@ -257,7 +288,7 @@ class MotorTrace:
         if path:
             try:
                 Path(path).parent.mkdir(parents=True, exist_ok=True)
-                self.f = open(path, "a", buffering=1 << 16)
+                self.f = open(path, "a", buffering=1)   # v3.9.5: line-buffered (a killed process lost the last ~2 s)
                 self.event("trace_start", pid=os.getpid())
             except Exception:
                 self.f = None
@@ -327,8 +358,9 @@ class RealArm:
     a motor without any state, or the complete motor state (pos, vel, torque, temperature) bit-identical for
     frozen_s seconds (after a power cut the driver keeps returning the last frame - same test as the plugin's
     safe_zero)."""
-    def __init__(self, mrt_deg, frozen_s=1.0):
+    def __init__(self, mrt_deg, frozen_s=1.0, connect_timeout_s=None):
         import logging
+        import threading
         import play_policy as pp
         self.pp = pp
         mrt = {m: (2.0 if m == "gripper" else float(mrt_deg)) for m in MOTORS}
@@ -336,9 +368,21 @@ class RealArm:
         logging.getLogger("lerobot.robots.utils").addFilter(self.clamps)
         self.robot = pp.make_robot(mrt)
         self.trace = MotorTrace()                     # v3.9.4: passive drop diagnostics
-        try:
-            self.robot.connect()
-        except Exception as e:
+        # v3.9.5: connect in a worker thread with a timeout. 00:15/00:19: after a hard stop the adapter hung inside
+        # libPCBUSB CAN_Initialize (pcan_usb_drv_open_device) forever, and the run hung at 'connecting the follower'.
+        tmo = float(connect_timeout_s if connect_timeout_s is not None else os.environ.get("HANDEYE_CONNECT_TIMEOUT_S", 10.0))
+        box = {}
+        def _conn():
+            try:
+                self.robot.connect(); box["ok"] = True
+            except BaseException as e:       # noqa: BLE001
+                box["e"] = e
+        th = threading.Thread(target=_conn, daemon=True, name="follower-connect"); th.start(); th.join(tmo)
+        if th.is_alive():
+            self.trace.event("connect_hung", s=tmo)
+            raise CanAdapterHung(f"{MSG_CAN_HUNG} (connect blocked > {tmo:.0f} s in the PCAN driver)")
+        if "e" in box:
+            e = box["e"]
             self.trace.event("connect_failed", err=str(e)[:200])
             raise ArmUnresponsive(f"connect failed: {e}") from None
         self.trace.event("connected", motors=sorted(self.robot.motors))
@@ -355,6 +399,7 @@ class RealArm:
             self.mrt = np.array([mrt[m] for m in MOTORS])
         self.frozen_s = frozen_s
         self._sig, self._sig_t0, self._off = None, None, False
+        self.t_last_read = None
 
     def _signature(self):
         sig = []
@@ -377,6 +422,7 @@ class RealArm:
             raise ArmUnresponsive(f"no motor feedback ({e})") from None
         self.trace.sample(self.robot.motors)
         now = time.monotonic()
+        self.t_last_read = now                         # v3.9.5: watchdog
         if sig == self._sig:
             self._sig_t0 = self._sig_t0 or now
             if now - self._sig_t0 >= self.frozen_s:
@@ -521,6 +567,121 @@ class SimCams:
         return _S()
 
 
+def samples_snapshot(ex, out, plan, board):
+    """v3.9.5: write samples.json of an aborted sweep (the sweep normally rewrites it after every pose)."""
+    if plan is None or not (ex.samples or ex.rejected):
+        return False
+    Path(out).mkdir(parents=True, exist_ok=True)
+    (Path(out) / "samples.json").write_text(json.dumps({"samples": ex.samples, "rejected": ex.rejected, "plan": plan,
+                                                        "board": board.spec}, indent=1))
+    return True
+
+
+# ---------------------------------------------------------------- v3.9.5 watchdog
+class Watchdog:
+    """Background thread for the real arm (v3.9.5). The 00:08 run hung after 'pose 2' (wrist camera re-enumerating
+    on USB 5x in 30 s) with the motors on, and STOP did nothing: the Python signal handler only runs when the main
+    thread returns from the blocking call. This thread does not depend on the main thread:
+    - no successful motor read for warn_s (1 s): loud log line + a stack dump of all threads (faulthandler) into
+      the log, so the blocking call is known; repeated every 5 s while it lasts.
+    - STOP (SIGINT/SIGTERM, seen via signal.set_wakeup_fd even while the main thread is blocked) and no motor read
+      within stop_grace_s: torque off from this thread, then exit (rc 130).
+    - no motor read for hard_s (10 s) while the motors are on: same emergency torque off + exit (rc 3).
+    It is disarmed once the motors are off (arm._off) and never sends motion commands."""
+    def __init__(self, arm, ex, log=say, warn_s=1.0, hard_s=10.0, stop_grace_s=2.0, exit_fn=None):
+        import threading
+        self.arm, self.ex, self.log = arm, ex, log
+        self.warn_s, self.hard_s, self.stop_grace_s = warn_s, hard_s, stop_grace_s
+        self.exit_fn = exit_fn or os._exit
+        self.t_sig, self.stopped, self.rfd, self.old_fd = None, False, None, None
+        self.th = threading.Thread(target=self._run, daemon=True, name="handeye-watchdog")
+
+    def install_signal_pipe(self):
+        """Main thread only: the C-level signal handler writes the signal number into this pipe immediately."""
+        import signal
+        r, w = os.pipe()
+        os.set_blocking(w, False); os.set_blocking(r, False)
+        self.rfd = r
+        self.old_fd = signal.set_wakeup_fd(w)
+
+    def uninstall(self):
+        import signal
+        self.stopped = True
+        if self.rfd is not None:
+            try: signal.set_wakeup_fd(self.old_fd if self.old_fd is not None else -1)
+            except Exception: pass
+
+    def start(self):
+        self.th.start(); return self
+
+    def _stack(self):
+        import faulthandler
+        try:
+            sys.stdout.flush(); faulthandler.dump_traceback(file=sys.stdout, all_threads=True); sys.stdout.flush()
+        except Exception:
+            pass
+
+    def _emergency(self, why, rc):
+        import threading
+        self.log(f"WATCHDOG: {why} - motors off from the watchdog, then exit")
+        self._stack()
+        done = {}
+        def off():
+            try: done["ok"] = self.arm.stop_now()
+            except Exception as e: done["err"] = str(e)
+        t = threading.Thread(target=off, daemon=True); t.start(); t.join(3.0)
+        self.log("WATCHDOG: motors off" if done.get("ok") else f"WATCHDOG: torque-off not confirmed ({done.get('err', 'driver blocked')}) - "
+                 "hold the arm / use the power strip")
+        try:
+            tr = getattr(self.arm, "trace", None); tr and tr.event("watchdog_exit", why=why, rc=rc); tr and tr.close()
+        except Exception:
+            pass
+        sys.stdout.flush()
+        self.exit_fn(rc)
+
+    def _run(self):
+        warned_at = None
+        while not self.stopped:
+            time.sleep(0.1)
+            if self.rfd is not None:
+                try:
+                    import signal as _sg
+                    data = os.read(self.rfd, 64)
+                    if any(b in (_sg.SIGINT, _sg.SIGTERM) for b in data):
+                        self.t_sig = self.t_sig or time.monotonic()
+                        self.ex.stop_flag = True
+                except (BlockingIOError, OSError):
+                    pass
+            if getattr(self.arm, "_off", False):
+                continue
+            t_last = getattr(self.arm, "t_last_read", None)
+            if t_last is None:
+                continue
+            now = time.monotonic(); gap = now - t_last
+            if self.t_sig is not None and now - self.t_sig >= self.stop_grace_s and t_last < self.t_sig:
+                self._emergency(f"STOP pressed but the control loop is blocked (no motor read for {gap:.1f} s)", 130); return
+            if gap >= self.hard_s:
+                self._emergency(f"no motor read for {gap:.1f} s with the motors on (control loop blocked)", 3); return
+            if gap >= self.warn_s:
+                if warned_at is None or now - warned_at >= 5.0:
+                    self.log(f"WATCHDOG: no motor read for {gap:.1f} s (control loop blocked) - stack of all threads:")
+                    try:
+                        tr = getattr(self.arm, "trace", None); tr and tr.event("watchdog_gap", s=round(gap, 2))
+                    except Exception:
+                        pass
+                    self._stack(); warned_at = now
+            elif warned_at is not None:
+                self.log(f"WATCHDOG: motor reads resumed"); warned_at = None
+
+
+class SoftStop(RuntimeError):
+    """v3.9.5: soft stop requested (GUI '⏸ Stopp & zurück', flag file SOFTSTOP_FLAG)."""
+
+
+class CameraLost(RuntimeError):
+    """v3.9.5: the wrist camera delivered no frame for camera_lost_s in total -> end the sweep cleanly."""
+
+
 # ---------------------------------------------------------------- executor
 class Executor:
     def __init__(self, arm, cams, cfg, out_dir, sim=False, log=say):
@@ -531,6 +692,9 @@ class Executor:
         self.sim_t = 0.0
         self.n_moves = 0
         self.samples, self.rejected = [], []     # v3.9.2: kept on the executor so they survive an abort
+        self._stall_t0 = None                     # v3.9.5: start of the current camera stall
+        self.soft_flag, self.soft_active, self._soft_t = False, False, 0.0   # v3.9.5 soft stop
+        self.q_start = None                       # v3.9.5: joints at run start (soft-stop return target)
         self._last_q, self._same_t0 = None, None
         mrt = np.asarray(getattr(arm, "mrt", [cfg.get("follower_mrt_deg", cfg["max_step_deg"])] * 7), float)
         # v3.9.1: the setpoint never leads the measured position by more than lead_frac * max_relative_target, so
@@ -549,6 +713,14 @@ class Executor:
     def _check(self):
         if self.stop_flag:
             raise Stop()
+        if not self.soft_active:                  # v3.9.5 soft stop (flag file polled at most every 0.1 s)
+            now = time.monotonic()
+            if not self.soft_flag and now - self._soft_t >= 0.1:
+                self._soft_t = now
+                self.soft_flag = SOFTSTOP_FLAG.exists()
+            if self.soft_flag:
+                self.soft_active = True
+                raise SoftStop("Stopp & zurück angefordert")
         if not self.sim and time.time() - self.t_start > self.cfg["max_total_s"]:
             raise RuntimeError("time limit")
 
@@ -691,7 +863,10 @@ class Executor:
 
     def detect_wrist(self, board):
         """Fresh wrist frame + ChArUco detection. -> (det or None, frame, n_corners)."""
-        img, _ = self.cams["wrist"].grab(after_ts=time.time() if not self.sim else 0.0)
+        q6 = grip = None
+        if not self.sim and self._last_q is not None:
+            q6, grip = self._last_q[:6].copy(), float(self._last_q[6])
+        img, _ = self._grab("wrist", time.time() if not self.sim else 0.0, q6, grip)
         det = board.detect(img)
         return det, img, 0 if det is None else len(det["ids"])
 
@@ -765,15 +940,53 @@ class Executor:
             raise RuntimeError(f"path to the board pose not safe ({why})")
         self.move_to(qb, grip, speed=v)
 
-    def capture(self, i, board, hold):
-        """Two wrist frames 0.25 s apart (corner motion < 0.7 px = no blur / no shake) + one overview frame."""
+    def _grab(self, key, after_ts, q6=None, grip=None):
+        """v3.9.5: camera wait that keeps the control loop alive: the grab runs in a thread (hold_while) while the arm
+        holds q6 and is read every cycle. A FrameTimeout (3 s) is retried, still holding, up to frame_wait_s (60 s);
+        then FrameTimeout is raised (capture() retries the same pose). The stall time is counted across retries;
+        beyond camera_lost_s (90 s) -> CameraLost (sweep ends cleanly: solved if >= 10 samples, else --resume).
+        GUI log lines in German: 'Kamera weg – warte…' / 'Kamera wieder da – weiter'."""
+        cam = self.cams[key]
+        fn = lambda: cam.grab(after_ts=after_ts, timeout=self.cfg.get("frame_timeout_s", 3.0))
+        t0 = time.monotonic(); t_said = None
+        while True:
+            try:
+                r = self.hold_while(fn, q6, grip) if (q6 is not None and not self.sim) else fn()
+                if self._stall_t0 is not None:
+                    self.log(f"  Kamera wieder da – weiter ({key} camera back after {time.monotonic() - self._stall_t0:.0f} s)")
+                self._stall_t0 = None
+                return r
+            except FrameTimeout:
+                now = time.monotonic()
+                self._stall_t0 = self._stall_t0 or (now - self.cfg.get("frame_timeout_s", 3.0))
+                if now - self._stall_t0 >= self.cfg.get("camera_lost_s", 90.0):
+                    raise CameraLost(f"{key} camera: no frame for {now - self._stall_t0:.0f} s (USB re-enumerating? "
+                                     f"check the camera cable)") from None
+                if now - t0 >= self.cfg.get("frame_wait_s", 60.0):
+                    raise
+                if self.sim:
+                    time.sleep(0.02)              # sim/test cameras fail instantly; real grabs already wait 3 s
+                if t_said is None or now - t_said >= 10.0:
+                    self.log(f"  Kamera weg – warte… ({key} camera: no frame for {now - self._stall_t0:.0f} s, "
+                             f"holding the pose, motors are read)"); t_said = now
+
+    def capture(self, i, board, hold, q6=None, grip=None):
+        """Two wrist frames 0.25 s apart (corner motion < 0.7 px = no blur / no shake) + one overview frame.
+        v3.9.5: camera waits hold q6 and keep reading the motors; after frame_wait_s the same pose is retried
+        (David: wait rather than skip); CameraLost after camera_lost_s in total."""
         t0 = time.time()
+        b = None
         for attempt in range(3):
             self._check()
-            a, ta = self.cams["wrist"].grab(after_ts=t0)
-            hold()
-            self._sleep(0.25)
-            b, tb = self.cams["wrist"].grab(after_ts=ta + 1e-3 if not self.sim else 0)
+            try:
+                a, ta = self._grab("wrist", t0, q6, grip)
+                hold()
+                self._sleep(0.25)
+                b, tb = self._grab("wrist", ta + 1e-3 if not self.sim else 0, q6, grip)
+            except FrameTimeout:
+                self.log(f"  pose {i}: still no wrist frame - retrying the same pose")
+                t0 = time.time()
+                continue
             da, db = board.detect(a), board.detect(b)
             n = 0 if db is None else len(db["ids"])
             if da is not None and db is not None and n >= self.cfg["min_corners"]:
@@ -781,7 +994,10 @@ class Executor:
                 ia = {k: p for k, p in zip(da["ids"], da["img"])}; ib = {k: p for k, p in zip(db["ids"], db["img"])}
                 motion = float(np.mean([np.linalg.norm(ia[c] - ib[c]) for c in common])) if len(common) else 99
                 if motion < 0.7:
-                    ov, _ = self.cams["overview"].grab(after_ts=t0)
+                    try:
+                        ov, _ = self.cams["overview"].grab(after_ts=t0, timeout=self.cfg.get("frame_timeout_s", 3.0))
+                    except FrameTimeout:
+                        ov = np.zeros((360, 640, 3), np.uint8); self.log(f"  pose {i}: no overview frame (stored black)")
                     cv2.imwrite(str(self.out / f"wrist_{i:02d}.png"), b)
                     cv2.imwrite(str(self.out / f"overview_{i:02d}.png"), ov)
                     return {"corners": n, "motion_px": motion, "wrist": f"wrist_{i:02d}.png", "overview": f"overview_{i:02d}.png"}
@@ -789,7 +1005,8 @@ class Executor:
             else:
                 self.log(f"  pose {i}: only {n} board corners in the wrist image" + (", retry" if attempt < 2 else ""))
             t0 = time.time()
-        cv2.imwrite(str(self.out / f"rejected_wrist_{i:02d}.png"), b)
+        if b is not None:
+            cv2.imwrite(str(self.out / f"rejected_wrist_{i:02d}.png"), b)
         return None
 
     def run(self, plan, board, start=1, samples=None, rejected=None):
@@ -819,7 +1036,7 @@ class Executor:
             low = p.get("height_mm", 1e9) <= self.cfg.get("low_height_mm", 160)   # v3.9.3: slower near the board
             q_meas, ptp = self.move_to(p["q"], grip, speed=(min(self.cfg.get("low_speed_dps", 8.0), self.cfg["speed_dps"]) if low else None))
             hold = lambda: self.command(np.append(np.array(p["q"]), grip))
-            c = self.capture(i, board, hold)
+            c = self.capture(i, board, hold, q6=np.array(p["q"], float), grip=grip)
             row = {"i": i, "q": q_meas.tolist(), "q_planned": p["q"], "joint_ptp_deg": ptp, "time": time.time()}
             if c:
                 row.update(c); samples.append(row)
@@ -1010,7 +1227,15 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
         log("connecting the follower (collision guard ON, max_relative_target %.1f deg, approach %.0f deg/s, sweep %.0f deg/s)"
             % (mrt_deg, cfg.get("approach_speed_dps", 6.0), cfg["speed_dps"]))
         try:
-            arm = RealArm(mrt_deg, frozen_s=cfg.get("frozen_s", 1.0))
+            arm = RealArm(mrt_deg, frozen_s=cfg.get("frozen_s", 1.0), connect_timeout_s=cfg.get("connect_timeout_s", 10.0))
+        except CanAdapterHung as e:
+            # the connect thread is stuck in the driver (no torque was ever enabled): report and leave at once
+            log(f"ERROR: {e}")
+            for c in cams.values():
+                try: c.close()
+                except Exception: pass
+            sys.stdout.flush(); sys.stderr.flush()
+            os._exit(3)
         except ArmUnresponsive as e:
             log(f"ERROR: {MSG_NO_ARM} ({e})")
             for c in cams.values():
@@ -1028,10 +1253,26 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
     old = (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM))
     if real_signals:
         signal.signal(signal.SIGINT, on_sig); signal.signal(signal.SIGTERM, on_sig)
+    wd = None
+    if isinstance(arm, RealArm):                 # v3.9.5: watchdog (blocked control loop / STOP while blocked)
+        wd = Watchdog(arm, ex, log=log, warn_s=cfg.get("watchdog_warn_s", 1.0), hard_s=cfg.get("watchdog_hard_s", 10.0))
+        if real_signals:
+            wd.install_signal_pipe()
+        wd.start()
+    try:
+        SOFTSTOP_FLAG.unlink()                   # v3.9.5: stale soft-stop request from an earlier run
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
     rc, samples = 0, []
     off_only = False         # True: arm unresponsive or did not follow -> no further motion, just torque off once
     try:
-        log("RUNNING: auto calibration - STOP = motors off immediately")
+        log("RUNNING: auto calibration - STOP = motors off immediately, ⏸ Stopp & zurück = slowly back, then off")
+        try:
+            ex.q_start = np.asarray(ex.read()[0], float).copy()
+        except (ArmUnresponsive, Stop):
+            raise
         if auto:
             plan = ex.auto_start(board, guess=sim_guess, cam_model=cam_model)
         if prev is not None:
@@ -1048,18 +1289,42 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
     except BoardNotFound as e:
         log(f"ERROR: {e}"); rc = 4
     except Exception as e:
-        log(f"ABORT: {e}"); rc = 1
+        # v3.9.5: soft stop (GUI '⏸ Stopp & zurück') and every other abort while the motors still answer (camera
+        # outage, time limit, unsafe path ...): slowly (approach speed, same clamp + guard) back to the taught pose,
+        # then to the start pose of this run, then the plugin rest move (finally) and torque off
+        if isinstance(e, SoftStop):
+            log("Stopp & zurück: Ablauf abgebrochen, Proben gesichert, fahre langsam zurück (dann Motoren aus)"); rc = 5
+        else:
+            log(f"ABORT: {e}"); rc = 1
+            log("Stopp & zurück: fahre langsam zurück (dann Motoren aus)")
+        ex.soft_active = True
         try:
+            if samples_snapshot(ex, out, plan, board):
+                log(f"samples saved ({len(ex.samples)} good)")
+        except Exception:
+            pass
+        try:
+            v_back = cfg.get("approach_speed_dps", 6.0)
+            q, _ = ex.read()
             if not ex.stop_flag and plan is not None:
-                q_teach = np.array(plan["q_teach"]); q, _ = ex.read()
-                if HP.path_safety(kin, q[:6], q_teach, cfg)[0]:
+                q_teach = np.array(plan["q_teach"])
+                if np.max(np.abs(q[:6] - q_teach)) > 1.0 and HP.path_safety(kin, q[:6], q_teach, cfg)[0]:
                     log("returning to the taught pose")
-                    ex.move_to(q_teach, float(q[6]), speed=cfg.get("approach_speed_dps", 6.0))
+                    ex.move_to(q_teach, float(q[6]), speed=v_back)
+                    q, _ = ex.read()
+            if not ex.stop_flag and ex.q_start is not None and np.max(np.abs(q[:6] - ex.q_start[:6])) > 1.0:
+                if HP.path_safety(kin, q[:6], ex.q_start[:6], cfg)[0]:
+                    log("returning to the start pose of this run")
+                    ex.move_to(ex.q_start[:6], float(q[6]), speed=v_back)
+                else:
+                    log("start pose: path not safe, using the rest move only")
         except Stop:
             log("STOP: motors off now"); arm.stop_now(); rc = 130
         except ArmUnresponsive as e2:
             log(f"ERROR: {MSG_NO_ARM} ({e2})"); rc = 3; off_only = True
             _can_hint(e2, log)
+        except MotionAbort as e2:
+            log(f"return failed ({e2}): holding, then motors off"); off_only = True
         except Exception as e2:
             log(f"return failed ({e2})"); off_only = True
     finally:
@@ -1082,6 +1347,8 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
         for c in (cams or {}).values():
             try: c.close()
             except Exception: pass
+        if wd is not None:
+            wd.uninstall()
         if real_signals:
             signal.signal(signal.SIGINT, old[0]); signal.signal(signal.SIGTERM, old[1])
     samples = ex.samples                    # v3.9.2: also after an abort (was always 0 then)

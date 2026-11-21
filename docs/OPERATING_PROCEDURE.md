@@ -104,6 +104,16 @@ camera is. It replaces the manual corner touching (now the fallback, section 8b)
    - plans the 18 poses there (~40 s, the arm holds still), then moves pose by pose (max 12°/s, ~1.5 s per photo).
 4. **Stop** at any time: **■ STOPP Auto-Kalibrierung** (or Esc) = motors off immediately (the arm sags; it is ≥ 80 mm
    above the board). The power strip is still the emergency stop. Teleop START, policy and app reload are blocked.
+   **⏸ Stopp & zurück** (v3.9.5) = soft stop: the sweep ends, the samples are saved (solved if ≥ 10, otherwise
+   `--resume` is offered), the arm drives slowly (6 °/s, same clamp and collision guard) back to the taught pose and
+   the start pose of the run, then the rest move, then motors off. Every other abort while the motors still answer
+   (camera outage, time limit) ends the same way. If the arm cannot move, it falls back to motors off.
+   **Camera outage** (v3.9.5): the arm holds the pose and the motors keep being read; the log shows "Kamera weg –
+   warte…" and "Kamera wieder da – weiter". After 60 s the same pose is retried; after 90 s in total the run ends with
+   the soft stop. **Watchdog**: no motor read for 1 s -> "WATCHDOG: …" with a stack dump in the log; after 10 s (or
+   2 s after STOP while the control loop is blocked) the watchdog switches the motors off and ends the run.
+   **"CAN-Adapter hängt"** (v3.9.5): connecting took > 10 s (driver stuck after a hard stop): unplug the XCAN adapter
+   for a few seconds, plug it in (directly into the laptop if possible), start again.
 5. At the end the arm returns to the start pose, then to rest, motors off. The result appears in the box.
 
 Clean aborts (v3.9.1, one line in the box, no tracebacks; the motors are switched off once and NOTHING else moves):

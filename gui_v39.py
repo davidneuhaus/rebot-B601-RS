@@ -32,6 +32,25 @@ def _vision():
     return handeye, handeye_plan
 
 
+def _flow(frame, widgets, pad=4):
+    """v3.9.5: simple flow layout - grid the widgets left to right and start a new row when the next one would not
+    fit into the frame's current width (re-run on every resize)."""
+    def relayout(_e=None):
+        width = frame.winfo_width()
+        if width <= 1:
+            return
+        row = col = x = 0
+        for w in widgets:
+            need = w.winfo_reqwidth() + pad
+            if col and x + need > width:
+                row += 1; col = x = 0
+            w.grid_configure(row=row, column=col)
+            col += 1; x += need
+    frame.bind("<Configure>", relayout, add="+")
+    frame.after_idle(relayout)
+    return relayout
+
+
 class AutoCalUI:
     """ctx: log(str), teleop_active() -> bool, busy() -> str|None (reason the arm is in use: teleop/policy/recording)."""
 
@@ -43,22 +62,31 @@ class AutoCalUI:
         fr.pack(fill="x", padx=12, pady=(4, 0))
         r1 = tk.Frame(fr); r1.pack(fill="x")
         self.bteach = tk.Button(r1, text="📍 Ziel-Pose übernehmen", command=self.teach)
-        self.bteach.pack(side="left", padx=2)
+        self.bteach.grid(row=0, column=0, padx=2, pady=1, sticky="w")
         self.brun = tk.Button(r1, text="🤖 Auto-Kalibrierung …", font=("Helvetica", 13, "bold"), command=self.plan)
-        self.brun.pack(side="left", padx=2)
+        self.brun.grid(row=0, column=0, padx=2, pady=1, sticky="w")
         self.bstop = tk.Button(r1, text="■ STOPP Auto-Kalibrierung", font=("Helvetica", 13, "bold"), fg="#c0392b",
                                state="disabled", command=self.stop)
-        self.bstop.pack(side="left", padx=2)
+        self.bstop.grid(row=0, column=0, padx=2, pady=1, sticky="w")
+        # v3.9.5 soft stop: abort the sweep, save the samples, drive slowly back, then motors off (red STOPP = instant off)
+        self.bsoft = tk.Button(r1, text="⏸ Stopp & zurück", font=("Helvetica", 13, "bold"), state="disabled",
+                               command=self.soft_stop)
+        self.bsoft.grid(row=0, column=0, padx=2, pady=1, sticky="w")
+        self.soft_requested = False
         self.bapply = tk.Button(r1, text="✓ Übernehmen", command=self.apply_partial, state="disabled")
-        self.bapply.pack(side="left", padx=2)            # v3.9.2: apply an OK result of an aborted / partial run
+        self.bapply.grid(row=0, column=0, padx=2, pady=1, sticky="w")            # v3.9.2: apply an OK result of an aborted / partial run
         self.apply_folder = None; self.motors_off = False
         self.use_teach = tk.BooleanVar(value=False)         # v3.9.1: default automatic start
-        self.cteach = tk.Checkbutton(r1, text="Gespeicherte Ziel-Pose verwenden", variable=self.use_teach,
-                                     command=lambda: self._set(self._idle_text()))
-        self.cteach.pack(side="left", padx=6)
+        # v3.9.5: the tick has its own row below the buttons (it was cut off at the right edge on small screens)
+        r2 = tk.Frame(fr); r2.pack(fill="x")
+        self.cteach = tk.Checkbutton(r2, text="Gespeicherte Ziel-Pose verwenden", variable=self.use_teach,
+                                     command=lambda: self._set(self._idle_text()), anchor="w")
+        self.cteach.pack(side="left", padx=2)
+        _flow(r1, [self.bteach, self.brun, self.bstop, self.bsoft, self.bapply])     # v3.9.5: buttons wrap on narrow windows
         self.mode_auto = True
         self.msg = tk.Label(fr, text=self._idle_text(), fg="#555", anchor="w", justify="left", wraplength=760)
         self.msg.pack(fill="x")
+        self.msg.bind("<Configure>", lambda e: self.msg.configure(wraplength=max(200, e.width - 8)))   # v3.9.5
         root.bind_all("<Escape>", lambda e: self.stop() if self.running() else None, add="+")
         root.after(500, self._poll)
 
@@ -97,6 +125,7 @@ class AutoCalUI:
             has_teach = False
         self.cteach.config(state="normal" if has_teach and not self.busy() else "disabled")
         self.bstop.config(state="normal" if self.running() and not self.stopping else "disabled")
+        self.bsoft.config(state="normal" if self.running() and not self.stopping and not self.soft_requested else "disabled")
         self.bapply.config(state="normal" if self.apply_folder and not self.busy() else "disabled")
 
     # ---------------------------------------------------------------- 1. teach (read-only)
@@ -222,7 +251,7 @@ class AutoCalUI:
         if reason:
             self._set(f"Geht gerade nicht: {reason}", "#c0392b"); return
         self.ctx["log"]("\n=== Auto-Kalibrierung startet – ■ STOPP Auto-Kalibrierung / Esc = Motoren sofort aus ===\n")
-        self.stopping = False; self.result_lines = []; self.apply_folder = None; self.motors_off = False
+        self.stopping = False; self.soft_requested = False; self.result_lines = []; self.apply_folder = None; self.motors_off = False
         self.proc = subprocess.Popen(["/bin/bash", HANDEYE_SH, "run", "--yes"] + (["--auto"] if self.mode_auto else []) + EXTRA, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True, bufsize=1, start_new_session=True, cwd=HERE)
         threading.Thread(target=self._reader, args=(self.proc,), daemon=True).start()
@@ -244,6 +273,22 @@ class AutoCalUI:
         except Exception:
             pass
         self.root.after(1500, self._force, self.proc)
+        self.refresh()
+
+    def soft_stop(self):
+        """v3.9.5: '⏸ Stopp & zurück' - creates the flag file handeye.py polls (handeye.SOFTSTOP_FLAG); the run then
+        stops the sweep, saves the samples, drives slowly back and switches the motors off itself."""
+        if not self.running() or self.stopping or self.soft_requested:
+            return
+        try:
+            he, _ = _vision()
+            he.SOFTSTOP_FLAG.parent.mkdir(parents=True, exist_ok=True); he.SOFTSTOP_FLAG.write_text(str(time.time()))
+        except Exception as e:
+            self.ctx["log"](f"\nStopp & zurück fehlgeschlagen ({e}) – bitte ■ STOPP benutzen\n"); return
+        self.soft_requested = True
+        self.ctx["log"]("\n=== Auto-Kalibrierung: Stopp & zurück – Arm fährt langsam zurück, dann Motoren aus "
+                        "(■ STOPP = sofort aus) ===\n")
+        self._set("⏸ Stopp & zurück – Arm fährt langsam zurück …", "#d68910")
         self.refresh()
 
     def apply_partial(self):
@@ -312,6 +357,10 @@ class AutoCalUI:
                         self.result_lines.append(s)
                     if s.startswith(("pose ", "RUNNING", "start:", "board seen", "moving to", "start pose found")):
                         self._set("● LÄUFT: " + s[:110] + "   (■ STOPP / Esc = Motoren sofort aus)", "#1a9c3a")
+                    elif s.startswith(("Kamera weg", "Stopp & zurück", "WATCHDOG")):      # v3.9.5
+                        self._set("⚠ " + s[:140], "#d68910")
+                    elif s.startswith("Kamera wieder da"):
+                        self._set("● LÄUFT: " + s[:110], "#1a9c3a")
                     elif s.startswith(("ABORT", "ERROR", "refused", "quality POOR")):
                         self._set("⚠ " + s[:140], "#c0392b")
                     elif s.startswith("Hand-eye result") or s.startswith("  board pose spread") or s.startswith("  chain repro") \

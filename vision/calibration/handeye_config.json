@@ -52,6 +52,13 @@
  "stall_s": 2.5,
  "stall_min_progress_deg": 0.5,
  "frozen_s": 1.0,
+ "connect_timeout_s": 10.0,
+ "frame_timeout_s": 3.0,
+ "frame_wait_s": 60.0,
+ "camera_lost_s": 90.0,
+ "watchdog_warn_s": 1.0,
+ "watchdog_hard_s": 10.0,
+ "camera_wait_note": "v3.9.5: camera loss during a pose = hold + keep reading motors, wait up to frame_wait_s then retry the same pose; CameraLost after camera_lost_s (solve if >= 10 samples, else --resume). Watchdog: loud log + stack dump after watchdog_warn_s without a motor read, emergency torque off + exit after watchdog_hard_s or 2 s after STOP while blocked",
  "board_guess_mm": [
   463.0,
   -46.0,
