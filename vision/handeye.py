@@ -224,6 +224,25 @@ class CanAdapterHung(RuntimeError):
     """v3.9.5: the PCAN driver did not return from opening the adapter (connect timeout)."""
 
 
+# RobStride feedback frame fault bits (motorbridge fault_code bit0..bit5 = frame bits 16..21)
+ROBSTRIDE_FAULTS = {0: "undervoltage", 1: "overcurrent", 2: "overtemperature", 3: "magnetic encoder fault",
+                    4: "HALL encoder fault", 5: "not calibrated"}
+
+
+def decode_faults(fc):
+    return ", ".join(v for b, v in ROBSTRIDE_FAULTS.items() if int(fc) >> b & 1) or f"code {fc}"
+
+
+class MotorFault(RuntimeError):
+    """v3.9.7: a motor reports a fault flag or left run mode by itself (00:36 run: shoulder_lift went to reset mode
+    with fault 0x12 = overcurrent + HALL encoder fault at 76 C after ~2.5 min at 12-13 Nm; torque 0, the joint fell).
+    The message must not contain _COMM_WORDS (it is not a communication loss)."""
+
+
+class MotorHot(RuntimeError):
+    """v3.9.7: a motor's driver temperature (t_mos) reached motor_temp_stop_c -> soft stop return while it still works."""
+
+
 class FeedbackFrozen(RuntimeError):
     """v3.9.6: RealArm.read() - the complete motor state is bit-identical for frozen_s (stale driver frame).
     Not an ArmUnresponsive any more: the executor rides through it (Executor._ride_through)."""
@@ -409,21 +428,37 @@ class RealArm:
         self.frozen_s = frozen_s
         self._sig, self._sig_t0, self._off = None, None, False
         self.t_last_read = None
+        self._run_seen, self.temps = set(), {}          # v3.9.7
 
     def _signature(self):
         sig = []
+        temps = {}
         for n in sorted(self.robot.motors):
             st = self.robot.motors[n].get_state()
             if st is None:
                 raise ArmUnresponsive(f"motor {n} reports no state")
             sig.append((st.pos, st.vel, st.torq, getattr(st, "t_mos", None)))
+            # v3.9.7: fault flags / motor left run mode (status 2 = run, 0 = reset) / driver temperature
+            fc = int(getattr(st, "fault_code", 0) or 0); sc = getattr(st, "status_code", None)
+            if sc == 2:
+                self._run_seen.add(n)
+            if not self._off and (fc or (n in self._run_seen and sc == 0)):
+                why = decode_faults(fc) if fc else "left run mode (status 0)"
+                self.trace.event("motor_fault", motor=n, fc=fc, st=sc, t_mos=getattr(st, "t_mos", None))
+                raise MotorFault(f"MOTOR FAULT {n} (id {getattr(st, 'can_id', '?')}): {why}, driver "
+                                 f"{getattr(st, 't_mos', 0):.0f} C - the motor switched itself off")
+            try:
+                temps[n] = float(st.t_mos)
+            except Exception:
+                pass
+        self.temps = temps
         return tuple(sig)
 
     def read(self):
         try:
             o = self.robot.get_observation()
             sig = self._signature()
-        except ArmUnresponsive as e:
+        except (ArmUnresponsive, MotorFault) as e:
             self.trace.sample(self.robot.motors, err=f"read: {e}")
             raise
         except Exception as e:
@@ -706,6 +741,7 @@ class Executor:
         self.q_start = None                       # v3.9.5: joints at run start (soft-stop return target)
         self.riding, self._resynced, self.n_freezes, self._last_cmd = False, False, 0, None   # v3.9.6 ride-through
         self.ride_enabled = not sim and cfg.get("freeze_ride_s", 3.0) > 0   # off in sim (tests switch it on)
+        self.t_hot, self._temp_warned, self.q_wait, self.q_teach = None, set(), None, None   # v3.9.7
         self._last_q, self._same_t0 = None, None
         mrt = np.asarray(getattr(arm, "mrt", [cfg.get("follower_mrt_deg", cfg["max_step_deg"])] * 7), float)
         # v3.9.1: the setpoint never leads the measured position by more than lead_frac * max_relative_target, so
@@ -758,6 +794,7 @@ class Executor:
         q = np.asarray(q, float)
         if not np.all(np.isfinite(q)):
             raise ArmUnresponsive("invalid joint reading")
+        self._watch_temps()
         now = self._now()
         if self._last_q is not None and np.array_equal(q, self._last_q):
             self._same_t0 = self._same_t0 if self._same_t0 is not None else now
@@ -765,6 +802,60 @@ class Executor:
             self._same_t0 = None
         self._last_q = q.copy()
         return q, v
+
+    def _watch_temps(self):
+        """v3.9.7: driver temperatures (RealArm.temps): warn once at motor_temp_warn_c, MotorHot (soft stop return)
+        at motor_temp_stop_c; cool_down() pauses between poses at motor_temp_pause_c."""
+        temps = getattr(self.arm, "temps", None)
+        if not temps:
+            return
+        n, t = max(temps.items(), key=lambda kv: kv[1])
+        self.t_hot = (n, t)
+        if t >= self.cfg.get("motor_temp_warn_c", 60.0) and n not in self._temp_warned:
+            self._temp_warned.add(n)
+            self.log(f"  note: {n} driver at {t:.0f} C (holding load); pause at {self.cfg.get('motor_temp_pause_c', 64.0):.0f} C, "
+                     f"stop at {self.cfg.get('motor_temp_stop_c', 70.0):.0f} C")
+        if t >= self.cfg.get("motor_temp_stop_c", 70.0) and not self.soft_active:
+            raise MotorHot(f"{n} driver at {t:.0f} C (>= {self.cfg.get('motor_temp_stop_c', 70.0):.0f} C) - Stop & return, "
+                           f"let the arm cool down")
+
+    def to_wait_pose(self, grip):
+        """v3.9.7: sweep pose -> taught pose -> start pose (the path start <-> taught was checked by run())."""
+        sp = self.cfg.get("approach_speed_dps", 6.0)
+        if self.q_teach is not None:
+            self.move_to(self.q_teach, grip, speed=sp)
+        self.move_to(self.q_wait[:6], grip, speed=sp)
+
+    def from_wait_pose(self, grip):
+        if self.q_teach is not None:
+            self.move_to(self.q_teach, grip, speed=self.cfg.get("approach_speed_dps", 6.0))
+
+    def cool_down(self, q_wait, grip):
+        """v3.9.7: between poses: a motor at >= motor_temp_pause_c -> slowly to q_wait (start pose of the run, low
+        load), wait there (reading the motors) until all are < motor_temp_resume_c (max cool_max_s), then return.
+        -> True if it paused."""
+        if self.t_hot is None or self.t_hot[1] < self.cfg.get("motor_temp_pause_c", 64.0) or q_wait is None:
+            return False
+        n, t = self.t_hot
+        resume, tmax = self.cfg.get("motor_temp_resume_c", 52.0), self.cfg.get("cool_max_s", 420.0)
+        self.log(f"Motor heiß / motor hot: {n} {t:.0f} C - pausing at the start pose until < {resume:.0f} C")
+        self.to_wait_pose(grip)
+        t0 = time.monotonic(); t_said = t0
+        while True:
+            self._check()
+            self.command(np.append(np.asarray(q_wait[:6], float), grip))
+            self.read()
+            hot = self.t_hot[1] if self.t_hot else 0.0
+            if hot < resume:
+                self.log(f"  cooled down ({self.t_hot[0]} {hot:.0f} C after {time.monotonic() - t0:.0f} s) - continuing")
+                return True
+            if time.monotonic() - t0 >= tmax:
+                raise MotorHot(f"{self.t_hot[0]} still {hot:.0f} C after {tmax:.0f} s cooling")
+            if time.monotonic() - t_said >= 30:
+                self.log(f"  cooling: {self.t_hot[0]} {hot:.0f} C"); t_said = time.monotonic()
+            self._sleep(self.dt)
+            if self.sim:
+                time.sleep(0.005)
 
     def _frozen_for(self):
         return 0.0 if self._same_t0 is None else self._now() - self._same_t0
@@ -1067,7 +1158,23 @@ class Executor:
                 self._sleep(0.25)
                 b, tb = self._grab("wrist", ta + 1e-3 if not self.sim else 0, q6, grip)
             except FrameTimeout:
-                self.log(f"  pose {i}: still no wrist frame - retrying the same pose")
+                if self.q_wait is not None and q6 is not None:
+                    # v3.9.7: do not hold a loaded sweep pose for minutes (00:36: shoulder_lift overheated / faulted
+                    # while holding pose 16 for 60 s): wait at the start pose of the run, come back when frames return
+                    gq = float(grip if grip is not None else 0.0)
+                    self.log(f"  Kamera weg – warte in der Startpose (camera lost: waiting at the start pose, low load)")
+                    self.to_wait_pose(gq)
+                    while True:
+                        try:
+                            self._grab("wrist", time.time(), self.q_wait[:6], gq)
+                            break
+                        except FrameTimeout:
+                            continue
+                    self.log(f"  pose {i}: camera back - moving to the pose again")
+                    self.from_wait_pose(gq)
+                    self.move_to(q6, gq, speed=self.cfg.get("low_speed_dps", 8.0))
+                else:
+                    self.log(f"  pose {i}: still no wrist frame - retrying the same pose")
                 t0 = time.time()
                 continue
             da, db = board.detect(a), board.detect(b)
@@ -1099,6 +1206,7 @@ class Executor:
         self.samples = list(samples or []); self.rejected = list(rejected or [])
         kin = Kin()
         q_teach = np.array(plan["q_teach"], float)
+        self.q_teach = q_teach
         q7, _ = self.read()
         grip = float(q7[6])
         # start path: current -> taught pose (checked); if unsafe, refuse
@@ -1115,6 +1223,8 @@ class Executor:
             if i < start:
                 continue
             self._check()
+            if self.cool_down(self.q_wait, grip):           # v3.9.7: motor hot -> pause at the start pose
+                self.from_wait_pose(grip)
             self.log(f"pose {i}/{len(plan['poses'])}: height {p['height_mm']:.0f} mm, tilt {p['tilt_deg']:.0f}, roll {p['roll_deg']:.0f}")
             low = p.get("height_mm", 1e9) <= self.cfg.get("low_height_mm", 160)   # v3.9.3: slower near the board
             q_meas, ptp = self.move_to(p["q"], grip, speed=(min(self.cfg.get("low_speed_dps", 8.0), self.cfg["speed_dps"]) if low else None))
@@ -1356,6 +1466,8 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
             ex.q_start = np.asarray(ex.read()[0], float).copy()
         except (ArmUnresponsive, Stop):
             raise
+        if not sim and cfg.get("wait_at_start_pose", True):
+            ex.q_wait = ex.q_start.copy()          # v3.9.7: low-load pose for camera waits and cooling pauses
         if auto:
             plan = ex.auto_start(board, guess=sim_guess, cam_model=cam_model)
         if prev is not None:
@@ -1367,6 +1479,10 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
     except ArmUnresponsive as e:
         log(f"ERROR: {MSG_NO_ARM} ({e})"); rc = 3; off_only = True
         _can_hint(e, log)
+    except MotorFault as e:
+        # v3.9.7: a motor switched itself off - no return move with a limp joint, motors off at once
+        log(f"ERROR: {e}"); log("Motorfehler / motor fault: no return move - motors off. Let it cool down, check the "
+                                "load and the motor cable, power-cycle the arm before the next run"); rc = 3; off_only = True
     except MotionAbort as e:
         log(f"ABORT: {e}"); rc = 1; off_only = True
     except BoardNotFound as e:
@@ -1406,6 +1522,8 @@ def run(yes=False, sim=False, sim_truth=None, out_dir=None, apply_good=True, pla
         except ArmUnresponsive as e2:
             log(f"ERROR: {MSG_NO_ARM} ({e2})"); rc = 3; off_only = True
             _can_hint(e2, log)
+        except MotorFault as e2:
+            log(f"ERROR: {e2} - motors off"); rc = 3; off_only = True
         except MotionAbort as e2:
             log(f"return failed ({e2}): holding, then motors off"); off_only = True
         except Exception as e2:

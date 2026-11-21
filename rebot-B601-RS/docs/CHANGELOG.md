@@ -488,3 +488,31 @@ the leader.
   v3.9.5 and older suites; test files no longer react to a real GUI soft-stop flag.
 - Snapshots: versions/before_v3_9_6, versions/v3_9_6.
 
+## 3.9.7 – 2026-11-22 (laptop) – motor fault detection, temperature watch / cooling pause, low-load camera wait; public-repo scrub
+- Finding (00:33 run, motor trace logs/handeye_2026-11-22_00-33-48_motors.jsonl): the arm sagged BEFORE the GUI soft
+  stop. shoulder_lift held ~135 deg at -12.7 ... -13.3 Nm through the sweep (from 00:34:50); its driver temperature
+  (t_mos) rose from 32 C to 72 C by 00:35:14 and 78 C while the camera wait held pose 16 for ~60 s. At 00:36:31.42
+  shoulder_lift left run mode by itself (status 2 -> 0 = reset mode) with fault code 0x12 = overcurrent + HALL encoder
+  fault; torque 0, the limp joint swung 135 -> 209 deg in 0.6 s, then 209 -> 45 deg (00:36:35-38), was ~75 deg when
+  the return began at 00:36:40 and sank to ~0 deg by 00:36:48 while the other joints moved. The plugin collision guard (shoulder_pan "Leader-Abweichung", "Arm eingefroren") fired as a
+  consequence of the falling/swinging arm, not as the cause. David's "Stop & return" at 00:36:40 then started from the
+  sagged pose and could not make progress with a limp shoulder. No other motor ever reported st != 2 or fc != 0 in
+  the 00:08 / 00:23 / 00:33 traces (no false trips from the new check).
+- `handeye.py`: `MotorFault` - any fault flag (decoded: undervoltage, overcurrent, overtemperature, magnetic encoder,
+  HALL encoder, not calibrated) or a motor dropping from run mode to status 0 -> "MOTOR FAULT <joint> ..." and motors
+  off at once (no return move with a limp joint; rc 3). Also during a soft-stop return.
+- Temperature watch on every read: note at `motor_temp_warn_c` (60 C); before each pose a motor at
+  `motor_temp_pause_c` (64 C) -> "Motor heiß / motor hot": slowly via the taught pose to the start pose of the run (low
+  load), wait there until all drivers < `motor_temp_resume_c` (52 C, max `cool_max_s` 420 s), then continue;
+  `motor_temp_stop_c` (70 C) at any time -> `MotorHot` -> soft stop return.
+- Camera waits (`wait_at_start_pose`, default on): after `frame_wait_s` without a wrist frame the arm no longer holds
+  the loaded sweep pose for minutes; it moves via the taught pose to the start pose, waits there for the camera
+  ("Kamera weg – warte in der Startpose"), then returns and retries the same pose. CameraLost timing unchanged.
+- `tools/git_sync.sh` (repo rebot-B601-RS is public now): scrub extended to all private IPv4 ranges
+  (192.168/10/172.16-31 -> <lan-ip>), /Users/<name> and /home/<name> -> ~, laptop asset tags SH-nnnn-nnnn -> <laptop>;
+  refuses any e-mail address except the GitHub noreply author, bearer tokens, certificates, work-domain mentions.
+- Tests: vision/tests/test_handeye_v397.py (fault decode, status-0 / fault-code detection, not a comm error, no trip
+  before enable or after motors-off, hot motor -> MotorHot, none during soft return, cooling pause); all suites pass
+  (40). The English UI translation moves to 3.9.8.
+- Snapshots: versions/before_v3_9_7, versions/v3_9_7.
+

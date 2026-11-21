@@ -1,6 +1,6 @@
 # App 3.8: session recording with live markers, shared cameras, vision tools
 
-Installed on the laptop (SH-0000-0052) on 2026-11-21. Builds on 3.7 (guard v3.3). The GUI labels are German.
+Installed on the laptop (<laptop>) on 2026-11-21. Builds on 3.7 (guard v3.3). The GUI labels are German.
 Files: `teleop_gui.py`, `gui_v38.py` (new), `recorder.py`, `camera_feeds.py`, `tools/export_dataset.py` (new).
 Snapshots: `rebot-B601-RS/versions/before_v3_8` and `versions/v3_8` (`./rollback.sh before_v3_8`).
 

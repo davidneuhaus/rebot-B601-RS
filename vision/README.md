@@ -26,7 +26,7 @@ Options: `--device mps|cpu`, `--imgsz 640`, `--conf 0.15`, `--max-fps 10`, `--no
 The env has opencv-python-headless (no imshow). Live mode then prints fps and writes `/tmp/detect_last.jpg`.
 A real window needs a GUI-enabled OpenCV, which is not installed to avoid breaking LeRobot.
 
-## Install (done on SH-0000-0052)
+## Install (done on <laptop>)
 `pip install ultralytics` and `pip install git+https://github.com/ultralytics/CLIP.git` in the lerobot env,
 then restore `numpy==2.2.6` and `opencv-python-headless==4.13.0.92` (ultralytics pulls numpy 2.5 and
 opencv-python, which conflict with lerobot). `pip check` shows only ultralytics metadata warnings.

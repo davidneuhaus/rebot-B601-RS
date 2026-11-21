@@ -1,6 +1,6 @@
 # App 3.9: automatic hand-eye calibration ("🤖 Auto-Kalibrierung")
 
-Installed on the laptop (SH-0000-0052) on 2026-11-21. Builds on 3.8. GUI labels German, docs English.
+Installed on the laptop (<laptop>) on 2026-11-21. Builds on 3.8. GUI labels German, docs English.
 Replaces the manual corner-touch step (c), which failed in practice (the board slid, and the 9×6 checkerboard's corner
 order flips when the board is rotated). Runbook: `~/humanoid/docs/OPERATING_PROCEDURE.md` section 8.
 Snapshots: `versions/before_v3_9`, `versions/v3_9` (`./rollback.sh before_v3_9`).

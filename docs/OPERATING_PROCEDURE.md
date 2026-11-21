@@ -1,6 +1,6 @@
 # Operating procedure: humanoid arm on the laptop (app 3.9)
 
-Runbook for David. Laptop: MacBook Air M1 (SH-0000-0052), app "Robot Teleop" (desktop icon), code in `~/humanoid`.
+Runbook for David. Laptop: MacBook Air M1 (<laptop>), app "Robot Teleop" (desktop icon), code in `~/humanoid`.
 Emergency stop at any time: **switch off the power strip** of the arm.
 
 ---------------------------------------------------------------------------------------------------------
@@ -240,3 +240,13 @@ cd ~/humanoid/rebot-B601-RS
 ./rollback.sh status               # which snapshot matches now
 ```
 The current state is backed up to `backups/<time>/` first. The app reloads itself afterwards.
+
+## Motor heat and motor faults (3.9.7)
+- The auto calibration watches every motor's driver temperature. At 64 C it pauses: the arm goes slowly back to its
+  start pose, waits until all motors are below 52 C ("Motor heiß / motor hot ... cooled down"), then continues.
+  At 70 C it does "Stop & return". Long low poses load the shoulder (shoulder_lift) most.
+- If a motor reports a fault or switches itself off ("MOTOR FAULT shoulder_lift ..."), all motors go off at once and
+  there is no return move: the arm sinks - keep a hand near it. Let it cool down, check the load and the motor cable,
+  switch the arm power off and on before the next run.
+- When the wrist camera is lost during a pose, the arm now waits at its start pose (low load) instead of holding
+  the pose, and returns when the camera is back.

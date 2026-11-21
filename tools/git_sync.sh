@@ -6,7 +6,8 @@
 # already on this Mac (osxkeychain). Read-only for ~/humanoid; works in a separate clone ($HUMANOID_REPO).
 # Excluded: see the RSYNC filter below and .gitignore (venv, caches, datasets, outputs, logs, tmp, snapshots, *.bak*,
 # binaries, models, media, calibration captures, iPhone bridge secrets). Files > 1 MB are skipped.
-# Scrubbed in the committed copy only: LAN IPs (192.168.x.x -> <lan-ip>), /Users/<name> -> ~.
+# Scrubbed in the committed copy only: private IPs (192.168/10/172.16-31 -> <lan-ip>), /Users/<name> and /home/<name> -> ~,
+# laptop asset tags (SH-nnnn-nnnn -> <laptop>). The repo is PUBLIC (MIT) since 2026-11-22.
 # Before committing it refuses on: tokens (ghp_, github_pat_, sk-..., AKIA...), private keys, password assignments,
 # e-mail addresses, LAN IPs, personal absolute paths, staged files > 1 MB.
 set -euo pipefail
@@ -42,10 +43,13 @@ rsync -a --delete --max-size=1m \
   "$SRC/" "$REPO/"
 
 # scrub the committed copy (text files only)
+SCRUB_RE='(^|[^0-9.])(192\.168|10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01]))\.[0-9]{1,3}\.[0-9]{1,3}([^0-9.]|$)|/(Users|home)/[A-Za-z0-9._-]+|SH-[0-9]{4}-[0-9]{4}'
 git ls-files -co --exclude-standard -z | while IFS= read -r -d '' f; do
   [ -f "$f" ] && grep -Iq . "$f" 2>/dev/null || continue
-  if grep -Eq '192\.168\.[0-9]+\.[0-9]+|/Users/[A-Za-z0-9._-]+' "$f"; then
-    sed -E -i '' -e 's/192\.168\.[0-9]+\.[0-9]+/<lan-ip>/g' -e 's#/Users/[A-Za-z0-9._-]+#~#g' "$f"
+  if grep -Eq "$SCRUB_RE" "$f"; then
+    sed -E -i '' -e 's/(^|[^0-9.])(192\.168|10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01]))\.[0-9]{1,3}\.[0-9]{1,3}([^0-9.]|$)/\1<lan-ip>\4/g' \
+      -e 's/(^|[^0-9.])192\.168\.[0-9]{1,3}\.[0-9]{1,3}/\1<lan-ip>/g' \
+      -e 's#/(Users|home)/[A-Za-z0-9._-]+#~#g' -e 's/SH-[0-9]{4}-[0-9]{4}/<laptop>/g' "$f"
     echo "scrubbed: $f"
   fi
 done
@@ -59,8 +63,8 @@ while IFS= read -r f; do
   [ -f "$f" ] || continue
   sz=$(stat -f %z "$f"); if [ "$sz" -gt 1048576 ]; then echo "REFUSED: $f is $sz bytes (> 1 MB)"; fail=1; fi
 done <<< "$staged"
-PAT='ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|(password|passwd|api_key|apikey|secret_key)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{4,}|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(com|de|io|net|org)|192\.168\.[0-9]+\.[0-9]+|/Users/[A-Za-z0-9._-]+'
-hits="$(git diff --cached -U0 | grep -E '^\+' | grep -Ev '^\+\+\+' | grep -En "$PAT" || true)"
+PAT='ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|(password|passwd|api_key|apikey|secret_key)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{4,}|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[a-z]{2,}|'"$SCRUB_RE"'|social[h]ub|BEGIN CERTIFICAT[E]|Bearer [A-Za-z0-9._-]{20,}'
+hits="$(git diff --cached -U0 | grep -E '^\+' | grep -Ev '^\+\+\+' | grep -En "$PAT" | grep -v 'users\.noreply\.github\.com' || true)"
 if [ -n "$hits" ]; then echo "REFUSED: sensitive pattern in staged lines:"; echo "$hits" | cut -c1-160; fail=1; fi
 echo "staged: $(echo "$staged" | wc -l | tr -d ' ') files"
 if [ $fail -ne 0 ]; then git reset -q; echo "nothing committed"; exit 3; fi
