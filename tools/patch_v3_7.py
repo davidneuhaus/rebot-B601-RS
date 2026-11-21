@@ -1,3 +1,4 @@
+# Based on lerobot-robot-seeed-b601 1.0.5 by Seeed Technology Co., Ltd. (MIT); modified by David Neuhaus, 2026.
 """Guard v3.3 / app 3.7 patch (anchor-based, idempotent). Usage: python patch_v3_7.py <dir with the 5 files>"""
 import sys, os
 D = sys.argv[1]

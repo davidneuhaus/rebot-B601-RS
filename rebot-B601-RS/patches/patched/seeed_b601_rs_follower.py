@@ -1,3 +1,4 @@
+# Based on lerobot-robot-seeed-b601 1.0.5 by Seeed Technology Co., Ltd. (MIT); modified by David Neuhaus, 2026.
 import logging
 import math
 

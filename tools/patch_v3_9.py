@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Based on lerobot-robot-seeed-b601 1.0.5 by Seeed Technology Co., Ltd. (MIT); modified by David Neuhaus, 2026.
 """Patch teleop_gui.py 3.8 -> 3.9 (auto calibration button, gui_v39.py). Idempotent. Usage: patch_v3_9.py <teleop_gui.py>"""
 import sys
 p = sys.argv[1]

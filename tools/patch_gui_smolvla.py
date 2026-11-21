@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Based on lerobot-robot-seeed-b601 1.0.5 by Seeed Technology Co., Ltd. (MIT); modified by David Neuhaus, 2026.
 """Add the SmolVLA zero-shot mode (v3.5) to the v3.4 policy playback panel of teleop_gui.py.
 Usage: patch_gui_smolvla.py <in> <out>
 Adds: policy selector (ACT / SmolVLA), a text entry for the SmolVLA command (only shown for SmolVLA), a

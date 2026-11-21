@@ -1,12 +1,13 @@
 --- original/seeed_b601_rs_follower.py	2026-11-21 13:17:13
-+++ patched/seeed_b601_rs_follower.py	2026-11-21 14:56:56
-@@ -1,4 +1,5 @@
++++ patched/seeed_b601_rs_follower.py	2026-11-22 00:35:46
+@@ -1,4 +1,6 @@
++# Based on lerobot-robot-seeed-b601 1.0.5 by Seeed Technology Co., Ltd. (MIT); modified by David Neuhaus, 2026.
  import logging
 +import math
  
  from .config_seeed_b601_rs_follower import SeeedB601RSFollowerConfig
  from .seeed_b601_follower import SeeedB601FollowerBase
-@@ -110,16 +111,49 @@
+@@ -110,16 +112,49 @@
          else:
              self._gripper_open_stall_count = 0
  

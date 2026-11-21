@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Based on lerobot-robot-seeed-b601 1.0.5 by Seeed Technology Co., Ltd. (MIT); modified by David Neuhaus, 2026.
 """Add the policy playback panel (v3.4) to teleop_gui.py.  Usage: patch_gui_play.py <in> <out>
 Anchor-based and idempotent: the main panel is inserted right before the log window ("out = scrolledtext..."),
 plus small optional hooks (teleop START refused / no app reload / window close while a policy runs).

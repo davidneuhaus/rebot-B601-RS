@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Based on lerobot-robot-seeed-b601 1.0.5 by Seeed Technology Co., Ltd. (MIT); modified by David Neuhaus, 2026.
 """v3.6: command bar in teleop_gui.py (replaces the cramped v3.5 selector row + dry-run checkbox).
 
 Usage: patch_gui_ui_v3_6.py <in> <out>

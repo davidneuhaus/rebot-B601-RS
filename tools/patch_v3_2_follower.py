@@ -1,3 +1,4 @@
+# Based on lerobot-robot-seeed-b601 1.0.5 by Seeed Technology Co., Ltd. (MIT); modified by David Neuhaus, 2026.
 """Apply the guard v3.2 (gravity-aware) patch to seeed_b601_follower.py (v3.1). Usage: python patch_v3_2_follower.py <file>"""
 import sys
 path = sys.argv[1]
