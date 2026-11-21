@@ -8,6 +8,7 @@ timeline around the failure (+-5 s) and prints a verdict:
   C  only distal motors silent, proximal still answer     -> cable / plug between the last answering and the first
                                                              silent motor (wrist cable)
   D  a motor reports a fault flag                         -> undervoltage / overcurrent / overtemp / encoder
+  E  motors and both cameras stop together (v3.9.6)       -> shared USB hub / system-wide stall
 It also says whether a camera (USB detach or frame stall) or the CAN adapter vanished first.
 
   .venv/bin/python tools/drop_report.py                 newest handeye log + matching monitor folder
@@ -60,6 +61,15 @@ def handeye_lines(path):
             if t < t0 - 60: t += 86400
             out.append((float(t), m[4]))
     return out
+
+
+def _cams_stalled_with(cam_ev, t_motor, tol=0.5):
+    """True if every camera role that stalled in the window stalled within tol s of t_motor, and >= 2 roles did."""
+    first = {}
+    for e in cam_ev:
+        if e["ev"] == "stall":
+            first.setdefault(e["role"], e["t"] - e.get("since_s", 0))
+    return len(first) >= 2 and all(abs(t - t_motor) <= tol for t in first.values())
 
 
 def analyse(log, window=5.0, mon_dir=None):
@@ -166,6 +176,11 @@ def analyse(log, window=5.0, mon_dir=None):
         first_silent = min(silent, key=silent.get)
         V.append(f"C  only some motors went silent: {', '.join(silent)} (first: {first_silent}); still answering: "
                  f"{', '.join(prox)} -> check the cable/plug between {prox[-1] if prox else '?'} and {first_silent}")
+    elif motors and last_adv and _cams_stalled_with(cam_ev, max(last_adv.values())):
+        # v3.9.6: both camera feeds and the whole CAN bus stopped together -> not a motor cable
+        V.append("E  system / USB-hub-wide stall: all motors AND the camera frames stopped within 0.5 s, the CAN adapter "
+                 "stayed enumerated -> shared USB 2.0 hub (power/ground dip, hub reset) or a macOS stall (CPU / memory "
+                 "pressure); put the XCAN adapter on its own laptop port, cameras on a separate powered hub")
     elif motors:
         spread = (max(last_adv.values()) - min(last_adv.values())) if last_adv else 0
         V.append(f"B  whole bus silent while the CAN adapter stayed on USB (all {len(motors)} motors stopped within "

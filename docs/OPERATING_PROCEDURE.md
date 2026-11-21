@@ -112,6 +112,9 @@ camera is. It replaces the manual corner touching (now the fallback, section 8b)
    warte…" and "Kamera wieder da – weiter". After 60 s the same pose is retried; after 90 s in total the run ends with
    the soft stop. **Watchdog**: no motor read for 1 s -> "WATCHDOG: …" with a stack dump in the log; after 10 s (or
    2 s after STOP while the control loop is blocked) the watchdog switches the motors off and ends the run.
+   **Feedback freeze** (v3.9.6): if the motors stop answering for a moment (USB hub / system stall) the torque stays
+   on and the arm holds its last target: "Rückmeldung weg – halte Position, warte…". Back within 3 s -> "Rückmeldung
+   wieder da – weiter" and the pose continues; back within 10 s -> soft stop return; never back -> motors off.
    **"CAN-Adapter hängt"** (v3.9.5): connecting took > 10 s (driver stuck after a hard stop): unplug the XCAN adapter
    for a few seconds, plug it in (directly into the laptop if possible), start again.
 5. At the end the arm returns to the start pose, then to rest, motors off. The result appears in the box.

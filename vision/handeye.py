@@ -224,6 +224,15 @@ class CanAdapterHung(RuntimeError):
     """v3.9.5: the PCAN driver did not return from opening the adapter (connect timeout)."""
 
 
+class FeedbackFrozen(RuntimeError):
+    """v3.9.6: RealArm.read() - the complete motor state is bit-identical for frozen_s (stale driver frame).
+    Not an ArmUnresponsive any more: the executor rides through it (Executor._ride_through)."""
+
+
+class FeedbackRecovered(RuntimeError):
+    """v3.9.6: the feedback came back, but only after freeze_ride_s -> end the sweep with the soft stop return."""
+
+
 class MotionAbort(RuntimeError):
     """The arm does not follow the command (blocked, too weak, collision guard froze it)."""
 
@@ -427,7 +436,7 @@ class RealArm:
             self._sig_t0 = self._sig_t0 or now
             if now - self._sig_t0 >= self.frozen_s:
                 self.trace.event("frozen", s=round(now - self._sig_t0, 2))
-                raise ArmUnresponsive(f"motor feedback frozen for {now - self._sig_t0:.1f} s")
+                raise FeedbackFrozen(f"motor feedback frozen for {now - self._sig_t0:.1f} s")
         else:
             self._sig, self._sig_t0 = sig, None
         return np.array([o[f"{m}.pos"] for m in MOTORS], float), np.array([o.get(f"{m}.vel", 0.0) for m in MOTORS])
@@ -695,6 +704,8 @@ class Executor:
         self._stall_t0 = None                     # v3.9.5: start of the current camera stall
         self.soft_flag, self.soft_active, self._soft_t = False, False, 0.0   # v3.9.5 soft stop
         self.q_start = None                       # v3.9.5: joints at run start (soft-stop return target)
+        self.riding, self._resynced, self.n_freezes, self._last_cmd = False, False, 0, None   # v3.9.6 ride-through
+        self.ride_enabled = not sim and cfg.get("freeze_ride_s", 3.0) > 0   # off in sim (tests switch it on)
         self._last_q, self._same_t0 = None, None
         mrt = np.asarray(getattr(arm, "mrt", [cfg.get("follower_mrt_deg", cfg["max_step_deg"])] * 7), float)
         # v3.9.1: the setpoint never leads the measured position by more than lead_frac * max_relative_target, so
@@ -729,12 +740,21 @@ class Executor:
         frozen_s while we command motion -> ArmUnresponsive (checked in move_to)."""
         try:
             q, v = self.arm.read()
-        except (ArmUnresponsive, Stop):
+        except Stop:
             raise
+        except (ArmUnresponsive, FeedbackFrozen) as e:
+            if not self.ride_enabled or self.riding:
+                if isinstance(e, FeedbackFrozen):
+                    raise ArmUnresponsive(str(e)) from None
+                raise
+            q, v = self._ride_through(e)       # v3.9.6: hold, wait for the feedback, re-sync
         except Exception as e:
             if _is_comm_error(e):
-                raise ArmUnresponsive(str(e)) from None
-            raise
+                if not self.ride_enabled or self.riding:
+                    raise ArmUnresponsive(str(e)) from None
+                q, v = self._ride_through(e)
+            else:
+                raise
         q = np.asarray(q, float)
         if not np.all(np.isfinite(q)):
             raise ArmUnresponsive("invalid joint reading")
@@ -750,14 +770,72 @@ class Executor:
         return 0.0 if self._same_t0 is None else self._now() - self._same_t0
 
     def command(self, q7):
+        self._last_cmd = np.asarray(q7, float).copy()
         try:
             self.arm.command(q7)
-        except (ArmUnresponsive, Stop):
+        except Stop:
             raise
+        except ArmUnresponsive as e:
+            if not self.ride_enabled or self.riding:
+                raise
+            self._ride_through(e)              # v3.9.6: command not acknowledged -> hold + wait as for a freeze
         except Exception as e:
             if _is_comm_error(e):
-                raise ArmUnresponsive(str(e)) from None
-            raise
+                if not self.ride_enabled or self.riding:
+                    raise ArmUnresponsive(str(e)) from None
+                self._ride_through(e)
+            else:
+                raise
+
+    def _ride_through(self, err):
+        """v3.9.6 freeze ride-through. 00:24 run: a ~1 s system / USB-hub-wide stall (both cameras and all 7 motors
+        stopped at the same instant, the cameras were back 1.1 s later); the old rule (feedback frozen 1.0 s ->
+        torque off) dropped the arm. Now: torque stays ON, the last target is re-sent every cycle (the motors hold
+        it; the trajectory does not advance), the feedback is polled. Back within freeze_ride_s (3 s) -> re-sync
+        (move_to restarts its setpoint from the measured position) and continue. Back later, within
+        freeze_giveup_s (10 s) -> FeedbackRecovered (soft stop return). Never back -> ArmUnresponsive (torque off,
+        last resort). STOP still works (Stop is raised from _check)."""
+        ride_s, giveup_s = self.cfg.get("freeze_ride_s", 3.0), self.cfg.get("freeze_giveup_s", 10.0)
+        t0 = time.monotonic(); self.riding = True; self.n_freezes += 1
+        self.log(f"Rückmeldung weg – halte Position, warte… ({str(err)[:120]})")
+        tr = getattr(self.arm, "trace", None)
+        try:
+            tr and tr.event("ride_start", err=str(err)[:200])
+        except Exception:
+            pass
+        try:
+            while True:
+                self._check()
+                if self._last_cmd is not None:
+                    try:
+                        self.arm.command(self._last_cmd)
+                    except Stop:
+                        raise
+                    except Exception:
+                        pass
+                q = v = None
+                try:
+                    q, v = self.arm.read()
+                except Stop:
+                    raise
+                except Exception:
+                    q = None
+                now = time.monotonic(); dt = now - t0
+                if q is not None and np.all(np.isfinite(np.asarray(q, float))):
+                    self._resynced = True; self._same_t0 = None
+                    try:
+                        tr and tr.event("ride_end", s=round(dt, 2))
+                    except Exception:
+                        pass
+                    if dt <= ride_s:
+                        self.log(f"Rückmeldung wieder da nach {dt:.1f} s – weiter (Ziel auf Ist-Position gesetzt)")
+                        return q, v
+                    raise FeedbackRecovered(f"motor feedback was gone for {dt:.1f} s (> {ride_s:.0f} s) - Stopp & zurück")
+                if dt >= giveup_s:
+                    raise ArmUnresponsive(f"no motor feedback for {dt:.0f} s while holding ({str(err)[:100]})")
+                time.sleep(self.dt)
+        finally:
+            self.riding = False
 
     @staticmethod
     def _joint_table(q, sp, tgt):
@@ -795,6 +873,11 @@ class Executor:
                 self.command(np.append(sp, grip))
                 q, _ = self.read()
                 now = self._now()
+                if self._resynced:                  # v3.9.6: after a feedback freeze: restart from the measured pose
+                    self._resynced = False
+                    sp = q[:6].copy(); pin_t0 = [None] * 6
+                    t_limit = max(t_limit, now + 1.5 * float(np.max(np.abs(tgt - sp))) / v + cfg["reach_timeout_s"] + 5.0)
+                    continue
                 lag = np.abs(q[:6] - sp)
                 if np.max(lag) > cfg["max_lag_deg"]:
                     j = int(np.argmax(lag))

@@ -12,6 +12,9 @@ sys.path[:0] = [str(V), str(V.parent)]
 import handeye as H          # noqa: E402
 import handeye_plan as HP    # noqa: E402
 
+# never react to a real GUI soft-stop flag (~/humanoid/tmp/handeye_softstop) during tests
+H.SOFTSTOP_FLAG = Path(tempfile.mkdtemp()) / "no_softstop_flag"
+
 
 class FlakyCam:
     def __init__(self, fail_for_s):

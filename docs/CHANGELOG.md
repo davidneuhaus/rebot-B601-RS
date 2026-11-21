@@ -1,3 +1,27 @@
+## 3.9.6 – 2026-11-22 00:45 (laptop) – ride through feedback freezes instead of dropping the arm
+- Finding (00:23 run, drop at pose 7, report logs/handeye_2026-11-22_00-23-01_dropreport.md): both camera feeds stalled
+  at 00:24:00.98 and all 7 motors sent their last frame at 00:24:01.011 (same instant), no fault flags, the XCAN adapter
+  never left USB, the cameras were back 1.1 s later; the Innomaker detached 2 s AFTER motors-off. = a ~1 s
+  system / USB-hub-wide stall (shared USB 2.0 hub, 8 GB laptop swapping, GUI ~200 % CPU). The arm fell because
+  our own rule ("feedback frozen 1.0 s" -> torque off) switched the motors off.
+- `handeye.py`: a frozen feedback (`FeedbackFrozen`, no longer an ArmUnresponsive) or an unacknowledged command no
+  longer switches the torque off. `Executor._ride_through`: torque stays on, the last target is re-sent every cycle
+  (the trajectory does not advance), the feedback is polled. Back within `freeze_ride_s` (3 s): "Rückmeldung wieder da
+  nach x s – weiter", move_to restarts its setpoint from the measured position (no lag/stall abort from the pause)
+  and continues the pose. Back within `freeze_giveup_s` (10 s): `FeedbackRecovered` -> soft stop return (slowly back,
+  rest move, motors off, solve if >= 10). Never back: torque off as before (last resort). STOP still works.
+  `freeze_ride_s: 0` restores the old rule.
+- Motor-side CAN timeout: the plugin never sets the RobStride `canTimeout` parameter (factory default 0 = off, per the
+  RobStride docs; not read from the motors to keep the bus untouched); hold commands are re-sent during a freeze anyway.
+- GUI (`teleop_gui.py`): while the auto calibration runs, the camera previews refresh at ~2 fps (cameras still publish
+  full-rate frames for handeye.py) to cut CPU load. Active after "App neu laden".
+- `tools/drop_report.py`: new verdict E (motors and >= 2 camera feeds stop within 0.5 s -> shared USB hub / system
+  stall).
+- Tests: vision/tests/test_handeye_v396.py (short freeze ridden through with hold commands, command errors during the
+  freeze, long freeze -> FeedbackRecovered, no feedback -> give up, ride disabled = old rule, STOP during a freeze);
+  v3.9.5 and older suites; test files no longer react to a real GUI soft-stop flag.
+- Snapshots: versions/before_v3_9_6, versions/v3_9_6.
+
 ## 3.9.5 – 2026-11-22 00:25 (laptop) – camera outage hold/wait, watchdog, soft stop, connect timeout, GUI layout
 - Finding (00:08 run, 3.9.4 monitor): during the move to pose 2 the wrist camera (Innomaker) dropped off USB 5 times in
   30 s (detach/attach 00:08:54 - 00:09:26, same hub as the XCAN adapter; the CAN adapter stayed enumerated); GUI wrist

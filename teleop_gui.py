@@ -360,10 +360,20 @@ try:
     if any(getattr(_f, "publisher", None) for _f in cam_feeds):
         os.environ["HUMANOID_CAM_SHM"] = "1"   # children (recorder, play_policy) read the shared frames
     CAM_MS = max(30, int(1000 / max(1, cam_cfg.get("display_fps", 15))))
+    _cam_last = [0.0]
     def cam_tick():
-        for _u in cam_updates:
-            try: _u()
-            except Exception: pass
+        # v3.9.6: while the auto calibration runs, the previews refresh at ~2 fps (less CPU on the 8 GB laptop; the
+        # cameras keep publishing full-rate frames for handeye.py through the shared memory)
+        import time as _time
+        try:
+            _ac = globals().get("autocal"); _slow = bool(_ac is not None and _ac.busy())
+        except Exception:
+            _slow = False
+        if not _slow or _time.time() - _cam_last[0] >= 0.5:
+            _cam_last[0] = _time.time()
+            for _u in cam_updates:
+                try: _u()
+                except Exception: pass
         root.after(CAM_MS, cam_tick)
     root.after(300, cam_tick)
 except Exception as _e:
