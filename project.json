@@ -1,0 +1,69 @@
+{
+ "author": "David Neuhaus",
+ "repo": "https://github.com/davidneuhaus/rebot-B601-RS",
+ "repo_public": false,
+ "cover": "cover.webp",
+ "milestones": [
+  {
+   "done": true,
+   "de": "LeRobot + Seeed-Plugin installiert",
+   "en": "LeRobot + Seeed plugin installed"
+  },
+  {
+   "done": true,
+   "de": "Teleoperation Leader → Follower läuft",
+   "en": "Teleoperation leader → follower works"
+  },
+  {
+   "done": true,
+   "de": "Demonstrationen aufgenommen (erste 5 saubere Demos)",
+   "en": "Demonstrations recorded (first 5 clean demos)"
+  },
+  {
+   "done": true,
+   "de": "Erste ACT-Policy trainiert",
+   "en": "First ACT policy trained"
+  },
+  {
+   "done": false,
+   "de": "Policy am echten Arm getestet",
+   "en": "Policy tested on the real arm"
+  },
+  {
+   "done": false,
+   "de": "Kamera–Tisch–Roboter-Kalibrierung (in Arbeit)",
+   "en": "Camera–table–robot calibration (in progress)"
+  },
+  {
+   "done": false,
+   "de": "Greifen per Textbefehl",
+   "en": "Grasping by text command"
+  }
+ ],
+ "i18n": {
+  "en": {
+   "title": "Humanoid Logbook",
+   "intro": "We are teaching a robot arm not just to execute tasks but to **learn** them: **Seeed reBot B601-RS**, **LeRobot**, teleoperation with a leader arm, recording demonstrations and training locally on a Mac mini. This logbook records every working day – mindset, wins, fails and learnings – so you can rebuild it yourself.",
+   "status": {
+    "Phase": "Camera calibration",
+    "Arm": "reBot B601-RS + reBot 102 (leader)",
+    "Software": "LeRobot 0.7.x, teleop app 3.8",
+    "Training": "1 ACT run, untested on the arm",
+    "Code": "not published yet"
+   },
+   "about": "This logbook documents David Neuhaus's Humanoid Project. According to our notes the project started on November 9, 2026. There is one entry per working day with more than about an hour of work – and it is honest: with failures, uncertainties and estimated working times.\n\nEvery entry follows the same structure so you can follow the project step by step. There are no work logs for November 14 or November 17–20; undocumented work may exist there."
+  },
+  "de": {
+   "title": "Humanoid-Logbuch",
+   "intro": "Wir bringen einem Roboterarm bei, Aufgaben nicht nur auszuführen, sondern zu **lernen**: **Seeed reBot B601-RS**, **LeRobot**, Teleoperation per Leader-Arm, Demonstrationen aufnehmen und lokal auf dem Mac mini trainieren. Dieses Logbuch hält jeden Arbeitstag fest – mit Denkweise, Wins, Fails und Learnings –, damit du es nachbauen kannst.",
+   "status": {
+    "Phase": "Kamera-Kalibrierung",
+    "Arm": "reBot B601-RS + reBot 102 (Leader)",
+    "Software": "LeRobot 0.7.x, Teleop-App 3.8",
+    "Training": "1 ACT-Lauf, am Arm ungetestet",
+    "Code": "noch nicht veröffentlicht"
+   },
+   "about": "Dieses Logbuch dokumentiert das Humanoid-Projekt von David Neuhaus. Projektstart war laut Notizen der 9. November 2026. Es gibt einen Eintrag pro Arbeitstag mit mehr als etwa einer Stunde Arbeit – und zwar ehrlich: mit Fehlschlägen, Unsicherheiten und geschätzten Arbeitszeiten.\n\nDie Einträge folgen immer derselben Struktur, damit man das Projekt Schritt für Schritt nachvollziehen kann. Für den 14. sowie den 17.–20. November gibt es keine Arbeitsprotokolle; dort könnte es undokumentierte Arbeit geben."
+  }
+ }
+}
