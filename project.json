@@ -1,7 +1,7 @@
 {
  "author": "David Neuhaus",
  "repo": "https://github.com/davidneuhaus/rebot-B601-RS",
- "repo_public": false,
+ "repo_public": true,
  "cover": "cover.webp",
  "milestones": [
   {
