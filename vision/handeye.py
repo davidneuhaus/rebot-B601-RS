@@ -242,6 +242,83 @@ class _ClampCounter:
         return True
 
 
+class MotorTrace:
+    """v3.9.4: passive per-motor feedback trace for drop diagnostics (no bus traffic, no behaviour change).
+
+    Enabled when env HANDEYE_MOTOR_TRACE is a file path (handeye.sh sets <log>_motors.jsonl). One JSON line per
+    read() cycle: wall time (ms), per motor can_id, pos/vel/torq, t_mos/t_rotor, status_code, fault_code (RobStride
+    fault bits), raw arbitration id, and the driver's feedback_age_s / feedback_sequence (when a motor stops answering
+    its sequence stops and its age grows). Command errors / unresponsive events are written as {"ev": ...} lines.
+    Every failure inside the trace is swallowed: it can never stop or slow the calibration."""
+    def __init__(self, path=None):
+        path = path if path is not None else os.environ.get("HANDEYE_MOTOR_TRACE", "")
+        self.f = None
+        self.goal = None
+        if path:
+            try:
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+                self.f = open(path, "a", buffering=1 << 16)
+                self.event("trace_start", pid=os.getpid())
+            except Exception:
+                self.f = None
+
+    def _w(self, d):
+        if self.f is None:
+            return
+        try:
+            self.f.write(json.dumps(d, separators=(",", ":")) + "\n")
+        except Exception:
+            pass
+
+    def event(self, ev, **kw):
+        self._w({"t": round(time.time(), 3), "ev": ev, **kw})
+        try:
+            self.f and self.f.flush()
+        except Exception:
+            pass
+
+    def sample(self, motors, err=None):
+        if self.f is None:
+            return
+        try:
+            m = {}
+            for n in sorted(motors):
+                d = {}
+                try:
+                    snap = motors[n].get_state_snapshot()
+                    if snap is not None:
+                        d["age"] = round(float(snap.feedback_age_s), 4); d["seq"] = int(snap.feedback_sequence)
+                except Exception as e:
+                    d["snap_err"] = str(e)[:80]
+                try:
+                    st = motors[n].get_state()
+                    if st is None:
+                        d["none"] = 1
+                    else:
+                        d.update(id=st.can_id, arb=st.arbitration_id, st=st.status_code, fc=st.fault_code,
+                                 p=round(st.pos, 4), v=round(st.vel, 3), tq=round(st.torq, 3),
+                                 tm=round(st.t_mos, 1), tr=round(st.t_rotor, 1))
+                except Exception as e:
+                    d["state_err"] = str(e)[:80]
+                m[n] = d
+            rec = {"t": round(time.time(), 3), "m": m}
+            if self.goal is not None:
+                rec["goal"] = self.goal
+            if err:
+                rec["err"] = str(err)[:200]
+            self._w(rec)
+        except Exception:
+            pass
+
+    def close(self):
+        try:
+            if self.f:
+                self.event("trace_end"); self.f.close()
+        except Exception:
+            pass
+        self.f = None
+
+
 class RealArm:
     """Thin wrapper around the follower (same construction + safety settings as play_policy.py).
 
@@ -258,10 +335,13 @@ class RealArm:
         self.clamps = _ClampCounter()
         logging.getLogger("lerobot.robots.utils").addFilter(self.clamps)
         self.robot = pp.make_robot(mrt)
+        self.trace = MotorTrace()                     # v3.9.4: passive drop diagnostics
         try:
             self.robot.connect()
         except Exception as e:
+            self.trace.event("connect_failed", err=str(e)[:200])
             raise ArmUnresponsive(f"connect failed: {e}") from None
+        self.trace.event("connected", motors=sorted(self.robot.motors))
         try:
             self.dirs = dict(self.robot.config.joint_directions) or DEFAULT_DIRECTIONS
         except Exception:
@@ -289,14 +369,18 @@ class RealArm:
         try:
             o = self.robot.get_observation()
             sig = self._signature()
-        except ArmUnresponsive:
+        except ArmUnresponsive as e:
+            self.trace.sample(self.robot.motors, err=f"read: {e}")
             raise
         except Exception as e:
+            self.trace.sample(self.robot.motors, err=f"read: {e}")
             raise ArmUnresponsive(f"no motor feedback ({e})") from None
+        self.trace.sample(self.robot.motors)
         now = time.monotonic()
         if sig == self._sig:
             self._sig_t0 = self._sig_t0 or now
             if now - self._sig_t0 >= self.frozen_s:
+                self.trace.event("frozen", s=round(now - self._sig_t0, 2))
                 raise ArmUnresponsive(f"motor feedback frozen for {now - self._sig_t0:.1f} s")
         else:
             self._sig, self._sig_t0 = sig, None
@@ -305,8 +389,11 @@ class RealArm:
     def command(self, q7):
         """q7: RAW motor degrees (observation convention) -> action values (divide by joint_directions)."""
         try:
+            self.trace.goal = [round(float(v), 2) for v in q7]
             self.robot.send_action({f"{m}.pos": float(q7[k]) / (self.dirs.get(m, 1.0) or 1.0) for k, m in enumerate(MOTORS)})
         except Exception as e:
+            self.trace.event("command_error", err=str(e)[:300])
+            self.trace.sample(self.robot.motors, err=f"command: {e}")
             if _is_comm_error(e):
                 raise ArmUnresponsive(f"command not acknowledged ({e})") from None
             raise
@@ -317,6 +404,7 @@ class RealArm:
         if self._off:
             return True
         self._off = True
+        self.trace.event("stop_now")
         ok = True
         with _QuietLogs():
             try:
@@ -331,12 +419,17 @@ class RealArm:
                 self.robot.disconnect()
             except Exception:
                 pass
+        self.trace.event("stop_now_done", ack=ok); self.trace.close()
         return ok
 
     def finish(self):
         """Normal end: plugin rest move (safe_zero), then torque off."""
         self._off = True
-        self.robot.disconnect()
+        self.trace.event("finish")
+        try:
+            self.robot.disconnect()
+        finally:
+            self.trace.close()
 
 
 class SimArm:

@@ -20,6 +20,9 @@ case " $* " in *" --sim "*) LOGDIR="${HANDEYE_LOG_DIR:-${TMPDIR:-/tmp}/handeye_s
 mkdir -p "$LOGDIR"; LOG="$LOGDIR/handeye_$(date +%Y-%m-%d_%H-%M-%S).log"
 ls -1t "$LOGDIR"/handeye_*.log 2>/dev/null | tail -n +31 | while read -r f; do rm -f "$f"; done   # keep 30
 echo "Log: $LOG"
+# v3.9.4: passive per-motor feedback trace (vision/handeye.py MotorTrace) next to the log, for tools/drop_report.py
+export HANDEYE_MOTOR_TRACE="${LOG%.log}_motors.jsonl"
+ls -1t "$LOGDIR"/handeye_*_motors.jsonl 2>/dev/null | tail -n +31 | while read -r f; do rm -f "$f"; done   # keep 30
 set -o pipefail
 # v3.9.2: STOP (SIGTERM to the process group) must only reach handeye.py: it switches the motors off and may then
 # solve the partial sweep. bash keeps waiting (trap with a command; children get default handlers) and tee ignores

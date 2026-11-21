@@ -411,3 +411,22 @@ the leader.
 - Tests: vision/tests/test_handeye.py section 9 (profile + low speed); pytest 15/15; `run --sim --auto` GOOD.
   GUI test not run (no GUI change, no visible windows).
 - Snapshots: versions/before_v3_9_3, versions/v3_9_3.
+
+## 3.9.4 – 2026-11-21 23:58 (laptop) – passive drop diagnostics (no motion change)
+- Goal: find out exactly what breaks at the pose 13 -> 14 move (two drops: "pcan reconnect failed", "feedback frozen").
+- `vision/handeye.py` `MotorTrace`: with env `HANDEYE_MOTOR_TRACE` (set by handeye.sh to `logs/handeye_<ts>_motors.jsonl`)
+  every RealArm.read() writes per motor can_id, pos/vel/torque, t_mos/t_rotor, status_code, RobStride fault_code,
+  arbitration id and the driver's feedback age / sequence (cached driver state, no extra bus traffic), plus
+  command_error / frozen / stop_now events with ms timestamps. All trace errors are swallowed; control flow unchanged.
+- `tools/drop_monitor.sh start|stop|status` + `tools/drop_monitor.py`: passive background monitor -> `logs/dropmon_<ts>/`:
+  USB attach/detach/re-enumerate every 0.25 s via `ioreg -p IOUSB` (role tags: CAN adapter, leader serial, wrist/overview
+  camera, hubs; `log stream` needs admin, not used), GUI shared-frame stalls per camera (header read only, no device
+  access), and timestamped tails of handeye/recorder/GUI logs.
+- `tools/drop_report.py [log]`: timeline +-5 s around the failure, last frame per motor, verdict A (CAN adapter lost on
+  USB) / B (whole bus silent, adapter present: power or CAN cable to motor 1) / C (only distal motors silent: cable
+  between the last answering and first silent motor) / D (motor fault flag), and which vanished first (camera vs CAN).
+- Finding while setting up: XCAN-USB, leader USB Serial, C920 and Innomaker all share one USB 2.0 hub 3 levels deep;
+  the Innomaker's registry id is much newer than its neighbours' (it has re-enumerated since boot).
+- Tests: tools/tests/test_drop_diag.py 6/6 (fake motors, all verdicts); vision/tests/test_handeye.py 15/15.
+- Snapshots: versions/before_v3_9_4, versions/v3_9_4.
+

@@ -1,3 +1,33 @@
+## 3.9.4 – 2026-11-21 23:58 (laptop) – passive drop diagnostics (no motion change)
+- Goal: find out exactly what breaks at the pose 13 -> 14 move (two drops: "pcan reconnect failed", "feedback frozen").
+- `vision/handeye.py` `MotorTrace`: with env `HANDEYE_MOTOR_TRACE` (set by handeye.sh to `logs/handeye_<ts>_motors.jsonl`)
+  every RealArm.read() writes per motor can_id, pos/vel/torque, t_mos/t_rotor, status_code, RobStride fault_code,
+  arbitration id and the driver's feedback age / sequence (cached driver state, no extra bus traffic), plus
+  command_error / frozen / stop_now events with ms timestamps. All trace errors are swallowed; control flow unchanged.
+- `tools/drop_monitor.sh start|stop|status` + `tools/drop_monitor.py`: passive background monitor -> `logs/dropmon_<ts>/`:
+  USB attach/detach/re-enumerate every 0.25 s via `ioreg -p IOUSB` (role tags: CAN adapter, leader serial, wrist/overview
+  camera, hubs; `log stream` needs admin, not used), GUI shared-frame stalls per camera (header read only, no device
+  access), and timestamped tails of handeye/recorder/GUI logs.
+- `tools/drop_report.py [log]`: timeline +-5 s around the failure, last frame per motor, verdict A (CAN adapter lost on
+  USB) / B (whole bus silent, adapter present: power or CAN cable to motor 1) / C (only distal motors silent: cable
+  between the last answering and first silent motor) / D (motor fault flag), and which vanished first (camera vs CAN).
+- Finding while setting up: XCAN-USB, leader USB Serial, C920 and Innomaker all share one USB 2.0 hub 3 levels deep;
+  the Innomaker's registry id is much newer than its neighbours' (it has re-enumerated since boot).
+- Tests: tools/tests/test_drop_diag.py 6/6 (fake motors, all verdicts); vision/tests/test_handeye.py 15/15.
+- Snapshots: versions/before_v3_9_4, versions/v3_9_4.
+
+## Unreleased – 2026-11-21 (laptop) – grasp pipeline groundwork (no VERSION bump, no handeye/GUI changes)
+- New package `vision/grasp/` (dry run only, no motor/camera access):
+  `detect.py` YOLO-World free-text detection + outline (MobileSAM, GrabCut/box fallback) + grasp yaw from the
+  min-area-rectangle short axis; `locate.py` pixel -> 3D on the table plane from intrinsics.json / table.json
+  (+ handeye.json for the wrist camera), `CalibrationMissing` with a clear hint if a file is absent, and an IK reach
+  filter reusing `handeye_plan.Kin`; `grasp_plan.py` pre-grasp / descend / close / lift / place / return as joint
+  waypoints with height lock (min tip z = table + 12 mm), per-object profiles (`profiles.json`) and a gripper
+  success-check spec. The gripper mm -> deg map is a placeholder (`calibrated: false`), the jaw axis is assumed `y`.
+- `tools/grasp_demo.py`: dry run on a saved image or the GUI's shared frame (read-only) -> annotated.png + plan.json.
+- Tests: `vision/grasp/tests` (pytest 21 passed + 1 optional real-model smoke test, GRASP_TEST_MODELS=1).
+- Downloaded `vision/models/mobile_sam.pt` (40 MB, not synced to git). Added `docs/TODO.md` (grasp roadmap, 13 items).
+
 ## 3.9.3 – 2026-11-21 (laptop) – auto calibration: 'kraeftig' profile, 8 deg/s near the board
 - Two real runs (23:15, 23:35) died on the move pose 13 -> 14 ("pcan reconnect failed", then "motor feedback frozen
   1.0 s"; arm went limp). David's hint: earlier teleop drops happened with the 'vorsichtig' profile.
