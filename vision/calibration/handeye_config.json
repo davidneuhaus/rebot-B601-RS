@@ -1,0 +1,86 @@
+{
+ "table_z_mm": -70.0,
+ "table_z_note": "Height (robot base frame, gripper_end origin) at which the gripper touched the board in the step-c attempt on 2026-11-21 (corners A/B: -75/-66 mm). The board lies on a box next to the robot table, so it is NOT the base mounting plane. Used only for the safety floor and to aim the camera; the calibration itself measures the real board height.",
+ "heights_mm": [
+  150,
+  190,
+  230,
+  270
+ ],
+ "tilts_deg": [
+  0,
+  12,
+  25
+ ],
+ "rolls_deg": [
+  -35,
+  -12,
+  12,
+  35
+ ],
+ "n_poses": 18,
+ "min_clearance_mm": 80.0,
+ "min_link_z_mm": -20.0,
+ "max_roll_from_teach_deg": 40.0,
+ "joint_margin_deg": 5.0,
+ "speed_dps": 12.0,
+ "max_step_deg": 1.0,
+ "settle_s": 1.0,
+ "reach_tol_deg": 2.0,
+ "reach_tol_compliant_deg": 3.0,
+ "reach_timeout_s": 8.0,
+ "max_lag_deg": 10.0,
+ "min_corners": 10,
+ "max_total_s": 720,
+ "camera_prior": {
+  "offset_mm": [
+   -110.0,
+   0.0,
+   35.0
+  ],
+  "half_fov_deg": 30.0,
+  "note": "Rough wrist-camera guess for the planner's visibility check only (camera behind the fingertips, looking along the finger direction). The calibration replaces it."
+ },
+ "max_joint_roll_change_deg": 70,
+ "max_step_deg_note": "v3.9 value (1.0 deg) was used as LeRobot max_relative_target; replaced by follower_mrt_deg in v3.9.1",
+ "follower_mrt_deg": 4.0,
+ "follower_mrt_note": "v3.9.1: LeRobot max_relative_target for the arm joints (teleop uses 5). The executor keeps its goal within lead_frac * this of the MEASURED position, so LeRobot never clamps. With 1.0 the goal could lead by only 1 deg, too little PD torque to lift elbow_flex from rest (22:29 crash log).",
+ "lead_frac": 0.75,
+ "approach_speed_dps": 6.0,
+ "stall_s": 2.5,
+ "stall_min_progress_deg": 0.5,
+ "frozen_s": 1.0,
+ "board_guess_mm": [
+  463.0,
+  -46.0,
+  -70.0
+ ],
+ "search_heights_mm": [
+  260,
+  280,
+  240,
+  220
+ ],
+ "search_tilts_deg": [
+  30,
+  25,
+  35,
+  20,
+  40
+ ],
+ "search_min_clearance_mm": 200.0,
+ "aim_height_mm": 200.0,
+ "aim_tilts_deg": [
+  20,
+  25,
+  30,
+  15,
+  35,
+  10,
+  40
+ ],
+ "auto_iters": 3,
+ "auto_tol_mm": 25.0,
+ "wrist_hfov_deg_prior": 90.0,
+ "auto_note": "v3.9.1 automatic start: search pose search_heights_mm above the expected board point (handeye.json > taught pose > board_guess_mm), board centre from the wrist image (ray to the plane table_z_mm), then aim_height_mm above it; estimates must agree within auto_tol_mm."
+}

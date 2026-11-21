@@ -1,0 +1,55 @@
+# Humanoid Project app repo (rebot-B601-RS, branch main). tools/git_sync.sh copies ~/humanoid with the same rules.
+# environments / caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+.laptop_install
+.env
+# data, checkpoints, logs, scratch
+/datasets/
+/outputs/
+/logs/
+/tmp/
+/_xfer/
+/_backup*/
+*.log
+# snapshots and backups (rollback copies stay on the laptop)
+/rebot-B601-RS/versions/
+/rebot-B601-RS/backups/
+*.bak*
+# binaries, models, media
+/lib/
+*.dylib
+*.so
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.mp4
+*.mov
+*.avi
+*.jpg
+*.jpeg
+*.pdf
+!/vision/calibration/charuco_7x5_35mm_A4.pdf
+/vision/models/
+# per-session calibration captures and results
+/vision/calibration/handeye/
+/vision/calibration/history/
+/vision/calibration/handeye.json
+/vision/calibration/handeye_teach.json
+/vision/calibration/handeye_plan.json
+/vision/calibration/handeye_plan.png
+/vision/calibration/handeye_auto.json
+/vision/calibration/table.json
+# secrets of the iPhone camera bridge
+/tools/iphone_web_cam/token.txt
+/tools/iphone_web_cam/links.txt
+*.pem
+*.key
+*.crt
+*.p12

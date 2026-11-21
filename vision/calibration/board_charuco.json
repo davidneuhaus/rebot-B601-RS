@@ -1,0 +1,10 @@
+{
+ "type": "charuco",
+ "squares_x": 7,
+ "squares_y": 5,
+ "square_mm": 33.0,
+ "marker_mm": 24.51,
+ "dictionary": "DICT_5X5_100",
+ "pdf": "charuco_7x5_35mm_A4.pdf",
+ "note": "OpenCV cv2.aruco.CharucoBoard((7,5), 0.035, 0.026, DICT_5X5_100). Board frame = OpenCV board frame: origin at the outer corner of the square grid next to chessboard corner id 0, x along the 7 squares, y along the 5 squares, z = x cross y. Inner corners: 6 x 4 = 24 (ids 0..23, id = row*6 + col, position ((col+1)*35, (row+1)*35) mm). If the print is scaled, measure one square and change square_mm AND marker_mm proportionally. 2026-11-21: printed board measured at 33 mm per square (printer scaled to ~94%), so square_mm=33.0 and marker_mm=24.51."
+}

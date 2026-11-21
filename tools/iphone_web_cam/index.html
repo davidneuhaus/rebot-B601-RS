@@ -1,0 +1,121 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iPhone Robot Cam</title>
+<style>
+body{font-family:-apple-system,sans-serif;background:#111;color:#eee;margin:0;padding:12px;text-align:center}
+video{width:100%;max-height:55vh;background:#000;border-radius:8px}
+button{font-size:20px;padding:14px 24px;margin:8px;border-radius:10px;border:0;background:#2a7;color:#fff}
+#stop{background:#a33} #s{font-size:15px;margin-top:8px} #info{font-size:13px;color:#999;margin-top:4px}
+select{font-size:16px;margin:4px;max-width:95%}
+label{font-size:14px;color:#bbb}
+</style></head><body>
+<h3 id="h">iPhone &rarr; Robot Cam</h3>
+<video id="v" playsinline muted autoplay></video><br>
+<label>Camera <select id="dev"><option value="facing:environment" selected>back camera</option><option value="facing:user">front camera</option></select></label><br>
+<label>Resolution <select id="res"><option value="640x480">640×480</option><option value="1280x720" selected>1280×720</option><option value="1920x1080">1920×1080</option></select></label>
+<label>FPS <select id="fps"><option>15</option><option>24</option><option selected>30</option><option>60</option></select></label><br>
+<button id="go">Start</button><button id="stop">Stop</button>
+<div id="s">idle – tap Start (camera list appears after permission)</div>
+<div id="info"></div>
+<script>
+// Token (t=...) and channel (cam=1|2) come from the URL and are passed unchanged to the WebSocket.
+const $=id=>document.getElementById(id);
+const v=$('v'), s=$('s'), info=$('info'), devSel=$('dev'), resSel=$('res'), fpsSel=$('fps');
+const CAM=(new URLSearchParams(location.search)).get('cam')==='2'?2:1;
+$('h').innerHTML='iPhone &rarr; Robot Cam '+CAM+(CAM===1?' (overview)':' (gripper)');
+document.title='Robot Cam '+CAM;
+const KEY='robotcam.cam'+CAM;               // choice remembered per channel on this phone
+let ws=null, stream=null, timer=null, sent=0, t0=0, busy=false, running=false;
+const c=document.createElement('canvas'), g=c.getContext('2d');
+
+function loadPrefs(){ try{return JSON.parse(localStorage.getItem(KEY)||'{}');}catch(e){return {};} }
+function savePrefs(){ localStorage.setItem(KEY, JSON.stringify({dev:devSel.value, label:devSel.selectedOptions[0]?.text||'', res:resSel.value, fps:fpsSel.value})); }
+(function applyPrefs(){
+  const p=loadPrefs();
+  if(p.res && [...resSel.options].some(o=>o.value===p.res)) resSel.value=p.res;
+  if(p.fps && [...fpsSel.options].some(o=>o.value===p.fps)) fpsSel.value=p.fps;
+  if(p.dev){ if(![...devSel.options].some(o=>o.value===p.dev)){ const o=new Option(p.label||'saved camera',p.dev); devSel.add(o);} devSel.value=p.dev; }
+})();
+
+function constraints(){
+  const [w,h]=resSel.value.split('x').map(Number), fps=+fpsSel.value;
+  const video={width:{ideal:w},height:{ideal:h},frameRate:{ideal:fps,max:fps}};
+  const d=devSel.value;
+  if(d.startsWith('facing:')) video.facingMode={ideal:d.slice(7)};
+  else video.deviceId={exact:d};
+  return {audio:false, video};
+}
+
+async function listCameras(){
+  const keep=devSel.value;
+  const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+  devSel.innerHTML='';
+  devs.forEach((d,i)=>devSel.add(new Option(d.label||('camera '+(i+1)), d.deviceId)));
+  devSel.add(new Option('back camera (auto)','facing:environment'));
+  devSel.add(new Option('front camera (auto)','facing:user'));
+  // select the camera that is actually running, else the remembered one
+  const cur=stream&&stream.getVideoTracks()[0]?.getSettings().deviceId;
+  if(cur && devs.some(d=>d.deviceId===cur)) devSel.value=cur;
+  else if([...devSel.options].some(o=>o.value===keep)) devSel.value=keep;
+}
+
+async function openCamera(){
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  try{ stream=await navigator.mediaDevices.getUserMedia(constraints()); }
+  catch(e){
+    if(!devSel.value.startsWith('facing:')){            // saved device gone -> fall back to back camera
+      s.textContent='saved camera not available, using back camera';
+      devSel.value='facing:environment';
+      stream=await navigator.mediaDevices.getUserMedia(constraints());
+    } else throw e;
+  }
+  v.srcObject=stream; await v.play();
+  await listCameras(); savePrefs(); showInfo();
+}
+
+function showInfo(){
+  const t=stream&&stream.getVideoTracks()[0]; if(!t) return;
+  const st=t.getSettings();
+  info.textContent=`camera: ${t.label||'?'} | delivers ${st.width||'?'}×${st.height||'?'} @ ${st.frameRate?Math.round(st.frameRate):'?'} fps`;
+}
+
+async function start(){
+  stop(true);
+  try{ await openCamera(); }catch(e){ s.textContent='camera error: '+e; return; }
+  ws=new WebSocket('wss://'+location.host+'/ws'+location.search); ws.binaryType='arraybuffer';
+  ws.onopen=()=>{ws.send('hello cam'+CAM+' '+navigator.userAgent); ws.send('camera '+info.textContent); loop();};
+  ws.onclose=()=>{ if(running){ s.textContent='disconnected - tap Start'; } clearTimeout(timer); };
+  running=true; sent=0; t0=performance.now();
+}
+
+// change camera / resolution / fps while streaming: swap the camera, keep the WebSocket
+async function changed(){
+  savePrefs();
+  if(!running) return;
+  try{ await openCamera(); sent=0; t0=performance.now(); if(ws&&ws.readyState===1) ws.send('camera '+info.textContent); }
+  catch(e){ s.textContent='camera error: '+e; }
+}
+devSel.onchange=changed; resSel.onchange=changed; fpsSel.onchange=changed;
+
+function loop(){
+  const fps=+fpsSel.value;
+  timer=setTimeout(loop,1000/fps);
+  if(!ws||ws.readyState!==1||busy||!v.videoWidth) return;
+  if(ws.bufferedAmount>2e6) return;  // network backpressure
+  if(c.width!==v.videoWidth||c.height!==v.videoHeight){c.width=v.videoWidth;c.height=v.videoHeight;}
+  g.drawImage(v,0,0);
+  busy=true;
+  c.toBlob(b=>{busy=false; if(b&&ws&&ws.readyState===1){ws.send(b);sent++;}
+    const dt=(performance.now()-t0)/1000;
+    s.textContent=`streaming ${v.videoWidth}x${v.videoHeight}  ${(sent/dt).toFixed(1)} fps  (${sent} frames)`;
+  },'image/jpeg',0.8);
+}
+function stop(quiet){running=false; clearTimeout(timer); if(ws){ws.close();ws=null;} if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;} if(!quiet) s.textContent='stopped';}
+$('go').onclick=start;
+$('stop').onclick=()=>stop(false);
+// list cameras right away if permission was already granted earlier (labels are empty otherwise)
+navigator.mediaDevices.enumerateDevices().then(ds=>{ if(ds.some(d=>d.kind==='videoinput'&&d.label)) listCameras(); }).catch(()=>{});
+// keep screen awake where supported
+if('wakeLock' in navigator){document.addEventListener('click',()=>navigator.wakeLock.request('screen').catch(()=>{}),{once:true});}
+</script></body></html>

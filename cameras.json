@@ -1,0 +1,9 @@
+{
+  "display_fps": 15,
+  "feeds": [
+    {"name": "Kamera 1: Greifer (Innomaker)", "source": "name:Innomaker|U20CAM", "role": "gripper",
+     "hint": "Innomaker U20CAM on the wrist, looking at the gripper. Found by name (v3.7): re-plugging and the built-in FaceTime camera no longer shift it. Dataset key observation.images.gripper. List: ~/humanoid/.venv/bin/python ~/humanoid/camera_feeds.py --list"},
+    {"name": "Kamera 2: Übersicht (Logitech C920)", "source": "name:C920", "role": "overview",
+     "hint": "Logitech C920, top view of arm, table and bin. Found by name (v3.7). Dataset key observation.images.overview. Robot Teleop needs camera permission in System Settings."}
+  ]
+}

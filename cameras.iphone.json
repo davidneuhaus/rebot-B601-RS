@@ -1,0 +1,9 @@
+{
+  "display_fps": 15,
+  "feeds": [
+    {"name": "Kamera 1: Übersicht (iPhone 1)", "source": "http://127.0.0.1:8090/stream1.mjpg",
+     "hint": "iPhone bridge: ~/humanoid/tools/iphone_web_cam/start.sh, then open link 1 from links.txt in Safari. USB camera instead: set source to \"0\", \"1\", ..."},
+    {"name": "Kamera 2: Greifer (iPhone 2)", "source": "http://127.0.0.1:8090/stream2.mjpg",
+     "hint": "iPhone bridge link 2, or a USB camera index such as \"1\" (Innomaker). Terminal/Python needs camera permission."}
+  ]
+}

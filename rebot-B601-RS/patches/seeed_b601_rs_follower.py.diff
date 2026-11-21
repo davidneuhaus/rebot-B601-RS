@@ -1,0 +1,63 @@
+--- original/seeed_b601_rs_follower.py	2026-11-21 13:17:13
++++ patched/seeed_b601_rs_follower.py	2026-11-21 14:56:56
+@@ -1,4 +1,5 @@
+ import logging
++import math
+ 
+ from .config_seeed_b601_rs_follower import SeeedB601RSFollowerConfig
+ from .seeed_b601_follower import SeeedB601FollowerBase
+@@ -110,16 +111,49 @@
+         else:
+             self._gripper_open_stall_count = 0
+ 
+-        if self._gripper_open_stall_count >= 5:
+-            logger.warning("gripper open-stall detected, cutting torque")
+-            motor.request_feedback()
+-            return 0.0
++        # PATCH v3.7 (Humanoid Project): the cut-off latched mid-stroke. In 'vorsichtig' (1.5 Nm opening) the
++        # gripper stalled at 75-175 deg (open stop ~270 deg) and, once cut, never got torque again while the leader
++        # stayed open (1276 'open-stall' lines in session 13:43). Now the cut only happens near the open stop
++        # (within GRIPPER_OPEN_STALL_ZONE_DEG, default 35 deg, of joint_limits max); a mid-stroke stall keeps the
++        # opening torque, and the warning is logged once per stall instead of every cycle.
++        if self._gripper_open_stall_count >= 20:  # PATCH: was 5
++            try:
++                import os as _os
++                _zone = float(_os.environ.get("GRIPPER_OPEN_STALL_ZONE_DEG", "35") or 35)
++            except ValueError:
++                _zone = 35.0
++            _open_max = float(getattr(self.config, "joint_limits", {}).get("gripper", (0.0, 270.0))[1])
++            near_open = math.degrees(state.pos) >= _open_max - _zone
++            if near_open:
++                if self._gripper_open_stall_count == 20:
++                    logger.warning("gripper open-stall at the open stop (%.0f deg), cutting torque", math.degrees(state.pos))
++                motor.request_feedback()
++                return 0.0
++            if self._gripper_open_stall_count == 20:
++                logger.warning("gripper opening stalls mid-stroke at %.0f deg (open stop ~%.0f deg) - keeping the opening "
++                               "torque (limit %.1f Nm), no cut-off", math.degrees(state.pos), _open_max,
++                               float(self.config.gripper_mit_torque_limit))
+ 
+         # Grasp/hold: closing-direction stall (object grasped) -> lower hold torque.
++        # PATCH (Humanoid Project): hold limit only when closing; opening always
++        # gets the full torque limit so it can break free from a grasp.
++        opening = (pos_target - state.pos) > 0.0
+         max_torque = (
+             self.config.gripper_mit_torque_limit
+-            if not stalled
++            if (not stalled or opening)
+             else self.config.gripper_mit_hold_torque_limit
+         )
++        # PATCH (Humanoid Project): separate, lower torque cap for CLOSING
++        # (set via env GRIPPER_CLOSE_TQ by teleop.sh). Velocity-based stall
++        # detection misses slowly yielding objects (cardboard), so the closing
++        # force itself must be small. Opening keeps the full limit.
++        if not opening:
++            try:
++                import os as _os
++                _ctq = float(_os.environ.get("GRIPPER_CLOSE_TQ", "0") or 0)
++            except ValueError:
++                _ctq = 0.0
++            if _ctq > 0.0:
++                max_torque = min(max_torque, _ctq)
+         motor.request_feedback()
+         return max(-max_torque, min(max_torque, impedance_torque))
