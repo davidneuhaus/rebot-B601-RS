@@ -34,7 +34,7 @@ Datei `entries/en/2026-11-22.md` und `entries/de/2026-11-22.md` erstellen:
     ## Quellen
     ## Code-Stand
 
-Nicht benötigte Abschnitte einfach weglassen. Die Tag-Nummer ergibt sich aus der Sortierung nach Datum.
+Nicht benötigte Abschnitte einfach weglassen. Die Tag-Nummer ergibt sich aus der Sortierung nach Datum. Kapitelliste und Zeitleiste auf der Startseite zeigen die neuesten Einträge oben (absteigend); Vor/Zurück auf Eintragsseiten: älterer / neuerer Tag.
 Markdown: Absätze, `-`/`1.` Listen, `**fett**`, `*kursiv*`, `` `code` ``, `[Link](url)`, `> Zitat`.
 
 ## Medien

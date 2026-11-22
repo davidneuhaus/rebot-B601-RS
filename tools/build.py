@@ -83,7 +83,7 @@ T = {
   brand="Humanoid Logbook", nav=["Cover","Chapters","Timeline","About"], day="Day", min="min", read="min read", work="Working time",
   ph="PLACEHOLDER", start="Start with Day 1 →", latest="Latest entry", kicker="A build logbook", stand="Project status",
   progress="Progress", entries="Entries", last="Last entry", timeline="Timeline", chapters="Chapters",
-  prev="← Previous day", next="Next day →", endnote="End of the logbook so far", back="Back to overview",
+  prev="← Older day", next="Newer day →", endnote="End of the logbook so far", back="Back to overview",
   footer="Humanoid Logbook · a project by {a} · draft, built locally on {d}", about_k="About the project", about_h="Why this logbook?",
   notpub="Not published yet", pubtxt="Code will be published once approved.", gh="Open GitHub repo ↗", fol_h="Follow along", fol_p="The code and this logbook live on GitHub. Star the repo to bookmark it, or hit Watch to get notified about new activity.", fol_star="★ Star on GitHub", fol_watch="Watch for updates", fol_feed="Atom feed of commits", fol_code="Code on GitHub", ghabout="Code on GitHub ↗", page_about="About the project", contact="Contact", ct_p="Questions or ideas? The best place is GitHub:", ct_issues="open an issue", ct_disc="join the Discussions", ct_mail="Prefer email? Write to", lic="MIT License", lic_p="Code is open source under the MIT License.", contact_p="Questions or feedback?"),
  "de": dict(
@@ -94,7 +94,7 @@ T = {
   brand="Humanoid-Logbuch", nav=["Titelseite","Kapitel","Zeitleiste","Über das Projekt"], day="Tag", min="Min.", read="Min. Lesezeit", work="Arbeitszeit",
   ph="PLATZHALTER", start="Mit Tag 1 beginnen →", latest="Neuester Eintrag", kicker="Ein Bau-Logbuch", stand="Stand des Projekts",
   progress="Fortschritt", entries="Einträge", last="Letzter Eintrag", timeline="Zeitleiste", chapters="Kapitel",
-  prev="← Vorheriger Tag", next="Nächster Tag →", endnote="Ende des bisherigen Logbuchs", back="Zurück zur Übersicht",
+  prev="← Älterer Tag", next="Neuerer Tag →", endnote="Ende des bisherigen Logbuchs", back="Zurück zur Übersicht",
   footer="Humanoid-Logbuch · ein Projekt von {a} · Entwurf, lokal gebaut am {d}", about_k="Über das Projekt", about_h="Warum dieses Logbuch?",
   notpub="Noch nicht veröffentlicht", pubtxt="Code wird veröffentlicht, sobald freigegeben.", gh="GitHub-Repo öffnen ↗", fol_h="Dabei bleiben", fol_p="Code und dieses Logbuch liegen auf GitHub. Gib dem Repo einen Stern als Lesezeichen oder klick auf „Watch“, um über Neues informiert zu werden.", fol_star="★ Stern auf GitHub", fol_watch="Updates verfolgen (Watch)", fol_feed="Atom-Feed der Commits", fol_code="Code auf GitHub", ghabout="Code auf GitHub ↗", page_about="Über das Projekt", contact="Kontakt", ct_p="Fragen oder Ideen? Am besten über GitHub:", ct_issues="ein Issue eröffnen", ct_disc="in den Discussions mitreden", ct_mail="Lieber per E-Mail? Schreib an", lic="MIT-Lizenz", lic_p="Der Code ist Open Source unter der MIT-Lizenz.", contact_p="Fragen oder Feedback?"),
 }
@@ -184,9 +184,9 @@ def build_lang(L):
     if n: stand += f'<li><span>{t["last"]}</span><strong>{entries[-1]["date"].strftime("%d.%m.%Y" if L=="de" else "%Y-%m-%d")}</strong></li>'
     prog = CFG["milestones"]; done = sum(1 for x in prog if x["done"]); pct = round(100*done/len(prog)) if prog else 0
     ms = "".join(f'<li class="{"done" if x["done"] else ""}"><span class="chk">{"✓" if x["done"] else ""}</span>{E(x[L])}</li>' for x in prog)
-    chapters = "".join(f'<li><a href="tag/{e["slug"]}.html"><span class="no">{t["day"]} {e["no"]}</span><span class="ct"><strong>{E(e["title"])}</strong><small>{t["fmt"](e["date"],t)} · {e["mins"]} {t["min"]}</small><span class="sum">{inline(e["summary"])}</span></span></a></li>' for e in entries)
+    chapters = "".join(f'<li><a href="tag/{e["slug"]}.html"><span class="no">{t["day"]} {e["no"]}</span><span class="ct"><strong>{E(e["title"])}</strong><small>{t["fmt"](e["date"],t)} · {e["mins"]} {t["min"]}</small><span class="sum">{inline(e["summary"])}</span></span></a></li>' for e in reversed(entries))
     dfmt = lambda d: d.strftime("%d.%m.") if L=="de" else d.strftime("%m/%d")
-    tl = "".join(f'<a class="node" href="tag/{e["slug"]}.html"><span class="d"></span><b>{dfmt(e["date"])}</b><small>{t["day"]} {e["no"]}</small></a>' for e in entries)
+    tl = "".join(f'<a class="node" href="tag/{e["slug"]}.html"><span class="d"></span><b>{dfmt(e["date"])}</b><small>{t["day"]} {e["no"]}</small></a>' for e in reversed(entries))
     cover = CFG.get("cover","")
     mrel = "" if L=="en" else "../"
     coverhtml = f'<div class="cover-img"><img src="{mrel}media/{cover}" alt=""></div>' if cover and (SITE/"media"/cover).exists() else ""
