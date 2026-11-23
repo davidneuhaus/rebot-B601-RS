@@ -36,8 +36,8 @@
   },
   {
    "done": false,
-   "de": "Greifen per Textbefehl (in Arbeit)",
-   "en": "Grasping by text command (in progress)"
+   "de": "Greifen per Textbefehl (erster programmierter Griff geschafft; als Nächstes SmolVLA)",
+   "en": "Grasping by text command (first programmed grasp done; next: SmolVLA)"
   }
  ],
  "i18n": {
@@ -45,7 +45,7 @@
    "title": "Humanoid Logbook",
    "intro": "We are teaching a robot arm not just to execute tasks but to **learn** them: **Seeed reBot B601-RS**, **LeRobot**, teleoperation with a leader arm, recording demonstrations and training locally on a Mac mini. This logbook records every working day – mindset, wins, fails and learnings – so you can rebuild it yourself.",
    "status": {
-    "Phase": "Hand-eye calibrated, first grasp in progress",
+    "Phase": "First grasp done; moving to rigid mounts & SmolVLA",
     "Arm": "reBot B601-RS + reBot 102 (leader)",
     "Software": "LeRobot 0.7.x, teleop app 3.8",
     "Training": "1 ACT run, untested on the arm",
@@ -57,7 +57,7 @@
    "title": "Humanoid-Logbuch",
    "intro": "Wir bringen einem Roboterarm bei, Aufgaben nicht nur auszuführen, sondern zu **lernen**: **Seeed reBot B601-RS**, **LeRobot**, Teleoperation per Leader-Arm, Demonstrationen aufnehmen und lokal auf dem Mac mini trainieren. Dieses Logbuch hält jeden Arbeitstag fest – mit Denkweise, Wins, Fails und Learnings –, damit du es nachbauen kannst.",
    "status": {
-    "Phase": "Hand-Auge kalibriert, erster Greifversuch in Arbeit",
+    "Phase": "Erster Griff geschafft; jetzt feste Kamerahalter & SmolVLA",
     "Arm": "reBot B601-RS + reBot 102 (Leader)",
     "Software": "LeRobot 0.7.x, Teleop-App 3.8",
     "Training": "1 ACT-Lauf, am Arm ungetestet",
